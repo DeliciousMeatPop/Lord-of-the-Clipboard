@@ -1,0 +1,29 @@
+{
+  "hotkeys": {
+    "show_window": "<alt>+v",
+    "show_favorites": "<alt>+b"
+  },
+  "monitor": {
+    "poll_interval_ms": 400,
+    "capture_text": true,
+    "capture_images": true,
+    "capture_files": true,
+    "max_text_length": 1000000,
+    "ignore_apps": ["keepass.exe", "keepassxc.exe", "1password.exe", "bitwarden.exe"]
+  },
+  "history": {
+    "max_items": 5000,
+    "dedupe_consecutive": true
+  },
+  "paste": {
+    "restore_focus": true,
+    "paste_on_enter": true,
+    "hide_after_paste": true
+  },
+  "ui": {
+    "theme": "dark",
+    "accent": "#7c5cff",
+    "list_preview_lines": 2,
+    "quick_select_digits": true
+  }
+}

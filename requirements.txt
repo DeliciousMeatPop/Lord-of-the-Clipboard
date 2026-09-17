@@ -1,0 +1,7 @@
+# Lord of the Clipboard — runtime dependencies (Windows)
+pywebview>=5.0        # native window + WebView2 frontend
+pywin32>=306          # clipboard access, foreground-window detection
+Pillow>=10.0          # image clipboard capture / conversion
+pynput>=1.7           # global hotkeys + synthetic Ctrl+V paste
+psutil>=5.9           # resolve source-app process name / path
+uiautomation>=2.0     # read the active browser tab's URL (site tracking)

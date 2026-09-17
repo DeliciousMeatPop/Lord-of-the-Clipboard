@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lord of the Clipboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Title / search bar (also the window drag handle) -->
+  <header id="titlebar">
+    <div class="brand" title="Lord of the Clipboard">
+      <span class="crown">♛</span>
+    </div>
+    <div class="search-wrap">
+      <input id="search" type="text" placeholder="Search clips, sites, apps…  (type to filter)" autocomplete="off" spellcheck="false" />
+    </div>
+    <div class="titlebar-actions no-drag">
+      <button id="tab-all"   class="seg active" data-mode="all">All</button>
+      <button id="tab-fav"   class="seg" data-mode="fav">★ Favorites</button>
+      <button id="tab-days"  class="seg" data-mode="days">By day</button>
+      <button id="btn-settings" class="icon-btn" title="Settings">⚙</button>
+      <button id="btn-close" class="icon-btn" title="Hide (Esc)">✕</button>
+    </div>
+  </header>
+
+  <div id="main">
+    <!-- Filter sidebar -->
+    <aside id="sidebar" class="no-drag">
+      <div class="side-section">
+        <div class="side-title">Days</div>
+        <ul id="day-filter" class="side-list"></ul>
+      </div>
+      <div class="side-section">
+        <div class="side-title">Sites</div>
+        <ul id="domain-filter" class="side-list"></ul>
+      </div>
+      <div class="side-section">
+        <div class="side-title">Apps</div>
+        <ul id="app-filter" class="side-list"></ul>
+      </div>
+    </aside>
+
+    <!-- Clip list -->
+    <main id="list" class="no-drag" tabindex="0"></main>
+  </div>
+
+  <footer id="statusbar">
+    <span id="active-filters"></span>
+    <span class="hint">Enter paste · double-click paste · right-click for “Paste as” · 1–9 quick-pick · Esc hide</span>
+  </footer>
+
+  <!-- Context menu -->
+  <div id="ctx" class="ctx hidden no-drag"></div>
+
+  <!-- Settings modal -->
+  <div id="settings" class="modal hidden no-drag">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>Settings</h2>
+        <button id="settings-close" class="icon-btn">✕</button>
+      </div>
+      <div class="modal-body" id="settings-body"></div>
+      <div class="modal-foot">
+        <button id="settings-save" class="btn primary">Save</button>
+        <button id="settings-cancel" class="btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

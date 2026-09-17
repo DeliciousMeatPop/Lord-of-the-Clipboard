@@ -1,0 +1,6 @@
+# local data (history DB, captured images, live config)
+/data/
+# python
+.venv/
+__pycache__/
+*.pyc
