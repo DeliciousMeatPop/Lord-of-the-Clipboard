@@ -58,7 +58,15 @@ jobs:
             --add-data "web;web" `
             --add-data "config.default.json;." `
             --collect-all pywebview `
+            --collect-all clr_loader `
+            --copy-metadata pythonnet `
+            --hidden-import clr `
+            --collect-all comtypes `
+            --collect-submodules uiautomation `
+            --collect-all pystray `
             --collect-submodules pynput `
+            --collect-all cryptography `
+            --collect-submodules win32com `
             --hidden-import win32timezone `
             --version-file packaging/file_version_info.txt `
             run_app.py
