@@ -27,7 +27,8 @@
   "paste": {
     "restore_focus": true,
     "paste_on_enter": true,
-    "hide_after_paste": true
+    "hide_after_paste": true,
+    "pick_action": "copy"
   },
   "ui": {
     "theme": "dark",

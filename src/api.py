@@ -9,7 +9,7 @@ import base64
 from typing import Any, Optional
 
 from . import config as cfg
-from . import importers, markup, paster, storage, sync
+from . import importers, markup, paster, storage, sync, templates
 from .paths import DATA_DIR
 
 
@@ -164,9 +164,13 @@ class Api:
         )
         return True
 
-    # -- snippets / import / sync -------------------------------------------
+    # -- snippets / templates / import / sync -------------------------------
     def create_snippet(self, name: str, content: str) -> int:
         return storage.create_snippet(name, content)
+
+    def resolve_token(self, name: str) -> dict:
+        """Resolve a snippet {token}: dynamic value, source candidates, or ask."""
+        return templates.resolve_token(name)
 
     def update_clip_text(self, clip_id: int, content: str) -> None:
         """Edit a snippet/clip's text in place (re-encrypting if needed)."""

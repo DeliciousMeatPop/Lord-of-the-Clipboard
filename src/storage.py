@@ -283,6 +283,22 @@ def days() -> list[str]:
         return [r["d"] for r in rows]
 
 
+def clips_from_source(term: str, limit: int = 25) -> list[dict[str, Any]]:
+    """Text clips whose source app or site matches `term` (newest first).
+
+    Powers snippet tokens like {telegram} / {app:telegram} / {site:steamdb.info}.
+    """
+    like = f"%{term}%"
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM clips WHERE type = 'text' AND is_snippet = 0 "
+            "AND (source_app LIKE ? OR source_domain LIKE ?) "
+            "ORDER BY COALESCE(last_used_at, created_at) DESC LIMIT ?",
+            (like, like, limit),
+        ).fetchall()
+        return [_decrypt_row(dict(r)) for r in rows]
+
+
 def content_types() -> list[dict[str, Any]]:
     with _connect() as conn:
         return [

@@ -13,6 +13,7 @@
     sel: 0,
     config: null,
     transforms: [],              // available paste transforms
+    pick: { buffer: "", timer: null },  // Ctrl+Shift numeric quick-pick
   };
 
   const TRANSFORM_LABELS = {
@@ -114,7 +115,7 @@
     if (c.last_used_at) times.push(`<span class="time">used ${timeLabel(c.last_used_at)}</span>`);
 
     el.innerHTML = `
-      <div class="idx">${i < 9 ? i + 1 : ""}</div>
+      <div class="idx">${i + 1}</div>
       <div class="body">
         ${bodyHtml}
         <div class="meta">${badges.join("")}</div>
@@ -184,19 +185,58 @@
   }
 
   /* ---------------------------------------------------------------- actions */
+  // A floating picker for choosing which source clip fills a {token}.
+  function chooseFromClips(title, candidates) {
+    return new Promise(resolve => {
+      const ov = document.createElement("div");
+      ov.className = "modal";
+      const items = candidates.map((c, i) => `
+        <div class="choose-item" data-i="${i}">
+          <div class="choose-when">${esc(timeLabel(c.last_used_at || c.created_at))} · ${esc(c.source_domain || c.source_app || "")}</div>
+          <div class="choose-text">${esc((c.preview || c.content || "").slice(0, 180))}</div>
+        </div>`).join("");
+      ov.innerHTML = `<div class="modal-card"><div class="modal-head"><h2>${esc(title)}</h2>
+        <button class="icon-btn" data-cancel>✕</button></div>
+        <div class="modal-body choose-list">${items}</div></div>`;
+      document.body.appendChild(ov);
+      ov.addEventListener("click", ev => {
+        if (ev.target.closest("[data-cancel]") || ev.target === ov) { ov.remove(); resolve(null); return; }
+        const it = ev.target.closest(".choose-item");
+        if (it) { const c = candidates[+it.dataset.i]; ov.remove(); resolve(c.content); }
+      });
+    });
+  }
+
+  async function fillTokens(text) {
+    const names = [...new Set([...text.matchAll(/\{([^}]+)\}/g)].map(m => m[1]))];
+    const values = {};
+    for (const n of names) {
+      const r = await api.resolve_token(n);
+      if (r.kind === "value") values[n] = r.value;
+      else if (r.kind === "source") {
+        if (r.candidates.length === 1) values[n] = r.candidates[0].content;
+        else {
+          const chosen = await chooseFromClips(`Pick a clip for {${n}}`, r.candidates);
+          if (chosen === null) return null;   // cancelled
+          values[n] = chosen;
+        }
+      } else {
+        const v = prompt(`${n}:`, "");
+        if (v === null) return null;
+        values[n] = v;
+      }
+    }
+    return values;
+  }
+
   async function paste(id, fmt = "", transform = "") {
     if (!api) return;
     const clip = state.clips.find(x => x.id === id);
-    // Snippet / any clip with {placeholders} → fill before pasting.
     const text = (clip && clip.content) || "";
-    const names = [...new Set([...text.matchAll(/\{([a-zA-Z0-9_ -]+)\}/g)].map(m => m[1]))];
-    if (clip && clip.is_snippet && names.length && !fmt && !transform) {
-      const values = {};
-      for (const n of names) {
-        const v = prompt(`${n}:`, "");
-        if (v === null) return;   // cancelled
-        values[n] = v;
-      }
+    const hasTokens = /\{[^}]+\}/.test(text);
+    if (clip && clip.is_snippet && hasTokens && !fmt && !transform) {
+      const values = await fillTokens(text);
+      if (values === null) return;   // cancelled
       await api.paste_snippet(id, values);
       return;
     }
@@ -291,6 +331,11 @@
       <div class="field"><label>Ignore apps (comma separated)</label>
         <input type="text" id="mon_ignore" value="${esc((mon.ignore_apps || []).join(', '))}"></div>
       <div class="field check"><input type="checkbox" id="ui_sound" ${ui.sound_on_capture ? 'checked' : ''}><label>Beep when something is captured</label></div>
+      <div class="field"><label>Ctrl+Shift+number quick-pick action</label>
+        <select id="pk_action">
+          <option value="copy"${(c.paste||{}).pick_action !== 'paste' ? ' selected' : ''}>Copy to clipboard</option>
+          <option value="paste"${(c.paste||{}).pick_action === 'paste' ? ' selected' : ''}>Paste into the app</option>
+        </select></div>
       <hr style="border-color:var(--line)">
       <div class="side-title" style="margin:0 0 8px">Privacy</div>
       <div class="field check"><input type="checkbox" id="pv_enc" ${(c.privacy||{}).encrypt ? 'checked' : ''}><label>Encrypt clip text at rest (key kept in data/secret.key)</label></div>
@@ -338,6 +383,7 @@
     c.monitor.capture_files = $("#mon_files").checked;
     c.monitor.ignore_apps = $("#mon_ignore").value.split(",").map(s => s.trim()).filter(Boolean);
     c.history = c.history || {}; c.history.max_items = parseInt($("#hist_max").value, 10) || 5000;
+    c.paste = c.paste || {}; c.paste.pick_action = $("#pk_action").value;
     c.privacy = c.privacy || {};
     c.privacy.encrypt = $("#pv_enc").checked;
     c.privacy.secret_expiry_minutes = parseInt($("#pv_exp").value, 10) || 0;
@@ -355,8 +401,63 @@
     if (ui.accent) document.documentElement.style.setProperty("--accent", ui.accent);
   }
 
+  /* ---------------------------------------------------------------- quick-pick
+     Hold Ctrl+Shift and type a clip's number. Every visible clip is numbered
+     1..N; as you type, matching numbers highlight and the rest dim. The instant
+     your digits can only be one clip (e.g. "13" when there's no 130+), it fires. */
+  function pickCandidates(buf) {
+    const out = [];
+    for (let i = 0; i < state.clips.length; i++) if (String(i + 1).startsWith(buf)) out.push(i);
+    return out;
+  }
+  function renderPick() {
+    const buf = state.pick.buffer;
+    $$(".clip").forEach(el => {
+      const n = +el.dataset.i + 1;
+      const cand = buf !== "" && String(n).startsWith(buf);
+      el.classList.toggle("pick-cand", cand);
+      el.classList.toggle("pick-dim", buf !== "" && !cand);
+    });
+    const st = $("#pick-status");
+    if (st) st.textContent = buf ? `pick #${buf}…` : "";
+  }
+  function clearPick() {
+    clearTimeout(state.pick.timer);
+    state.pick = { buffer: "", timer: null };
+    $$(".clip").forEach(el => el.classList.remove("pick-cand", "pick-dim"));
+    const st = $("#pick-status"); if (st) st.textContent = "";
+  }
+  async function confirmPick(i) {
+    const c = state.clips[i];
+    clearPick();
+    if (!c) return;
+    const action = (state.config && state.config.paste && state.config.paste.pick_action) || "copy";
+    if (action === "paste") { await paste(c.id); }
+    else { await api.copy_clip(c.id); if (api.hide) api.hide(); }
+  }
+  function feedPick(digit) {
+    state.pick.buffer += digit;
+    const cands = pickCandidates(state.pick.buffer);
+    renderPick();
+    clearTimeout(state.pick.timer);
+    if (cands.length === 1) { confirmPick(cands[0]); return; }
+    if (cands.length === 0) { clearPick(); return; }
+    // Still ambiguous, but the buffer itself may be a valid exact number
+    // (e.g. "5" while 50 also exists) — confirm it after a short pause.
+    const exact = (+state.pick.buffer) - 1;
+    if (exact >= 0 && exact < state.clips.length)
+      state.pick.timer = setTimeout(() => confirmPick(exact), 650);
+  }
+
   /* ---------------------------------------------------------------- keyboard */
   document.addEventListener("keydown", (e) => {
+    // Ctrl+Shift+digit → numeric quick-pick (works regardless of focus)
+    if (e.ctrlKey && e.shiftKey && /^[0-9]$/.test(e.key)) { e.preventDefault(); feedPick(e.key); return; }
+    if (state.pick.buffer) {
+      if (e.key === "Backspace") { e.preventDefault(); state.pick.buffer = state.pick.buffer.slice(0, -1); renderPick(); return; }
+      if (e.key === "Enter") { e.preventDefault(); const x = (+state.pick.buffer) - 1; if (x >= 0 && x < state.clips.length) confirmPick(x); else clearPick(); return; }
+      if (e.key === "Escape") { e.preventDefault(); clearPick(); return; }
+    }
     if (!$("#settings").classList.contains("hidden")) {
       if (e.key === "Escape") $("#settings").classList.add("hidden");
       return;
@@ -367,10 +468,6 @@
     if (e.key === "ArrowDown") { e.preventDefault(); state.sel = Math.min(state.sel + 1, state.clips.length - 1); highlight(); return; }
     if (e.key === "ArrowUp")   { e.preventDefault(); state.sel = Math.max(state.sel - 1, 0); highlight(); return; }
     if (e.key === "Enter") { const c = selectedClip(); if (c) paste(c.id); return; }
-    // digit quick-pick 1-9 (only when not typing an edit besides search)
-    if (/^[1-9]$/.test(e.key) && document.activeElement === $("#search") && $("#search").value === "") {
-      const c = state.clips[+e.key - 1]; if (c) { e.preventDefault(); paste(c.id); }
-    }
   });
 
   /* ---------------------------------------------------------------- wiring */
@@ -387,7 +484,7 @@
     $("#btn-close").addEventListener("click", () => api && api.hide());
     $("#btn-new-snippet").addEventListener("click", async () => {
       const name = prompt("Snippet name:"); if (!name) return;
-      const content = prompt("Snippet text (use {placeholders} for fill-in blanks):", ""); if (content === null) return;
+      const content = prompt("Snippet text. Tokens: {name} fill-in · {date} {time} {clipboard} · {telegram} or {site:steamdb.info} pull a past clip:", ""); if (content === null) return;
       await api.create_snippet(name, content);
       $$(".seg").forEach(x => x.classList.toggle("active", x.dataset.mode === "snippets"));
       state.mode = "snippets"; refresh();
