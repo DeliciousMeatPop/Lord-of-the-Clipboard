@@ -17,7 +17,7 @@ import sqlite3
 import time
 from typing import Any, Optional
 
-from . import paths
+from . import crypto, paths
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS clips (
@@ -26,15 +26,20 @@ CREATE TABLE IF NOT EXISTS clips (
     content       TEXT,                      -- text body, image relpath, or newline-joined file paths
     html          TEXT,                      -- rich CF_HTML fragment when the source provided one
     preview       TEXT,                      -- short text shown in the list
+    content_type  TEXT,                      -- auto-tag: url/email/color/code/json/... (text clips)
     source_app    TEXT,                      -- e.g. 'chrome.exe'
     source_title  TEXT,                      -- source window title
     source_exe    TEXT,                      -- full path to the source exe
     source_url    TEXT,                      -- full URL when copied from a browser
     source_domain TEXT,                      -- normalized host, e.g. 'steamdb.info'
     favorite      INTEGER NOT NULL DEFAULT 0,
+    is_snippet    INTEGER NOT NULL DEFAULT 0, -- saved reusable snippet (may hold {placeholders})
+    name          TEXT,                      -- snippet name
     category      TEXT,
+    encrypted     INTEGER NOT NULL DEFAULT 0, -- content/html stored encrypted
     created_at    REAL    NOT NULL,          -- epoch seconds — when first copied
     last_used_at  REAL,                      -- epoch seconds — when last pasted (NULL until used)
+    expires_at    REAL,                      -- epoch seconds — auto-delete after (NULL = keep)
     use_count     INTEGER NOT NULL DEFAULT 0,
     hash          TEXT                       -- for consecutive-dedupe
 );
@@ -42,6 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_clips_created ON clips(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clips_used    ON clips(last_used_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clips_fav     ON clips(favorite);
 CREATE INDEX IF NOT EXISTS idx_clips_domain  ON clips(source_domain);
+CREATE INDEX IF NOT EXISTS idx_clips_snippet ON clips(is_snippet);
 CREATE INDEX IF NOT EXISTS idx_clips_hash    ON clips(hash);
 """
 
@@ -69,21 +75,34 @@ def latest_hash() -> Optional[str]:
         return row["hash"] if row else None
 
 
+def _decrypt_row(d: dict[str, Any]) -> dict[str, Any]:
+    if d and d.get("encrypted"):
+        d["content"] = crypto.decrypt(d.get("content") or "")
+        if d.get("html"):
+            d["html"] = crypto.decrypt(d["html"])
+    return d
+
+
 def add_clip(
     type_: str,
     content: str,
     preview: str,
     html: str = "",
+    content_type: str = "",
     source_app: str = "",
     source_title: str = "",
     source_exe: str = "",
     source_url: str = "",
     source_domain: str = "",
+    expires_at: Optional[float] = None,
+    encrypt: bool = False,
+    is_snippet: int = 0,
+    name: str = "",
     dedupe_consecutive: bool = True,
 ) -> Optional[int]:
     """Insert a clip. Returns the new id, or None if it was a consecutive dupe."""
     h = _hash(type_, content)
-    if dedupe_consecutive and latest_hash() == h:
+    if dedupe_consecutive and not is_snippet and latest_hash() == h:
         # Identical to the clip already on top — bump its timestamp instead of duplicating.
         with _connect() as conn:
             conn.execute(
@@ -92,26 +111,49 @@ def add_clip(
                 (time.time(),),
             )
         return None
+
+    enc_flag = 0
+    stored_content, stored_html = content, (html or None)
+    if encrypt and type_ == "text":
+        stored_content, ok1 = crypto.encrypt(content)
+        if html:
+            stored_html, ok2 = crypto.encrypt(html)
+        else:
+            ok2 = True
+        enc_flag = 1 if (ok1 and ok2) else 0
+
     with _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO clips (type, content, html, preview, source_app, source_title, "
-            "source_exe, source_url, source_domain, created_at, hash) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (type_, content, html or None, preview, source_app, source_title, source_exe,
-             source_url, source_domain, time.time(), h),
+            "INSERT INTO clips (type, content, html, preview, content_type, source_app, "
+            "source_title, source_exe, source_url, source_domain, favorite, is_snippet, "
+            "name, encrypted, created_at, expires_at, hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (type_, stored_content, stored_html, preview, content_type or None, source_app,
+             source_title, source_exe, source_url, source_domain, 1 if is_snippet else 0,
+             1 if is_snippet else 0, name or None, enc_flag, time.time(), expires_at, h),
         )
         return cur.lastrowid
+
+
+def create_snippet(name: str, content: str) -> int:
+    """Save a reusable snippet (favorited, may contain {placeholders})."""
+    return add_clip(
+        type_="text", content=content, preview=content[:400],
+        content_type="snippet", is_snippet=1, name=name, dedupe_consecutive=False,
+    )
 
 
 def get_clip(clip_id: int) -> Optional[dict[str, Any]]:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM clips WHERE id = ?", (clip_id,)).fetchone()
-        return dict(row) if row else None
+        return _decrypt_row(dict(row)) if row else None
 
 
 def list_clips(
     query: str = "",
     favorites_only: bool = False,
+    snippets_only: bool = False,
+    content_type: str = "",
     category: str = "",
     source_app: str = "",
     domain: str = "",
@@ -128,8 +170,12 @@ def list_clips(
     """
     sql = "SELECT * FROM clips WHERE 1=1"
     args: list[Any] = []
+    sql += " AND is_snippet = 1" if snippets_only else " AND is_snippet = 0"
     if favorites_only:
         sql += " AND favorite = 1"
+    if content_type:
+        sql += " AND content_type = ?"
+        args.append(content_type)
     if category:
         sql += " AND category = ?"
         args.append(category)
@@ -154,7 +200,7 @@ def list_clips(
     sql += f" ORDER BY {order} LIMIT ? OFFSET ?"
     args += [limit, offset]
     with _connect() as conn:
-        return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        return [_decrypt_row(dict(r)) for r in conn.execute(sql, args).fetchall()]
 
 
 def mark_used(clip_id: int) -> None:
@@ -228,13 +274,36 @@ def days() -> list[str]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT DISTINCT d FROM ("
-            "  SELECT date(created_at,   'unixepoch', 'localtime') AS d FROM clips"
+            "  SELECT date(created_at,   'unixepoch', 'localtime') AS d FROM clips WHERE is_snippet = 0"
             "  UNION"
             "  SELECT date(last_used_at, 'unixepoch', 'localtime') AS d FROM clips"
-            "  WHERE last_used_at IS NOT NULL"
+            "  WHERE last_used_at IS NOT NULL AND is_snippet = 0"
             ") WHERE d IS NOT NULL ORDER BY d DESC"
         ).fetchall()
         return [r["d"] for r in rows]
+
+
+def content_types() -> list[dict[str, Any]]:
+    with _connect() as conn:
+        return [
+            dict(r) for r in conn.execute(
+                "SELECT content_type AS name, COUNT(*) AS n FROM clips "
+                "WHERE is_snippet = 0 AND content_type IS NOT NULL "
+                "AND content_type NOT IN ('text','') "
+                "GROUP BY content_type ORDER BY n DESC"
+            ).fetchall()
+        ]
+
+
+def prune_expired() -> int:
+    """Delete clips whose expiry has passed. Returns how many were removed."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM clips WHERE expires_at IS NOT NULL AND expires_at < ? "
+            "AND favorite = 0",
+            (time.time(),),
+        )
+        return cur.rowcount
 
 
 def prune(max_items: int) -> None:

@@ -15,6 +15,15 @@
     "max_items": 5000,
     "dedupe_consecutive": true
   },
+  "privacy": {
+    "encrypt": false,
+    "secret_expiry_minutes": 15,
+    "never_store_regex": []
+  },
+  "sync": {
+    "folder": "",
+    "import_on_start": false
+  },
   "paste": {
     "restore_focus": true,
     "paste_on_enter": true,
@@ -24,6 +33,7 @@
     "theme": "dark",
     "accent": "#7c5cff",
     "list_preview_lines": 2,
-    "quick_select_digits": true
+    "quick_select_digits": true,
+    "sound_on_capture": false
   }
 }

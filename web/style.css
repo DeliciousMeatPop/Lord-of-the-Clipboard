@@ -156,8 +156,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .ctx .item.danger:hover { background: color-mix(in srgb, var(--danger) 22%, transparent); color: var(--danger); }
 .ctx .sep { height: 1px; background: var(--line); margin: 4px 2px; }
 .ctx .sub-label { color: var(--muted-2); font-size: 11px; padding: 6px 10px 2px; text-transform: uppercase; letter-spacing: .06em; }
+.ctx .item.has-sub { position: relative; }
 .ctx .item .chev { color: var(--muted-2); }
-.ctx .submenu { position: fixed; }
+.ctx .submenu {
+  position: fixed; min-width: 190px; max-height: 60vh; overflow-y: auto;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 5px; z-index: 101;
+}
+.ctx .submenu .item { padding: 6px 10px; border-radius: 7px; }
 
 /* ----- modal ----- */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 200; }

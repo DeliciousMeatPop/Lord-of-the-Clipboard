@@ -189,6 +189,45 @@ def _collapse_blank_lines(t: str) -> str:
     return re.sub(r"\n\s*\n+", "\n\n", t)
 
 
+def _strip_tracking(t: str) -> str:
+    """Drop tracking query params (utm_*, fbclid, gclid, ref, …) from a URL."""
+    import re
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+    s = t.strip()
+    if not s.startswith(("http://", "https://")):
+        return t
+    junk = re.compile(r"^(utm_|fbclid|gclid|mc_|igshid|si$|ref$|ref_src$|spm$|_hsenc$|_hsmi$)", re.I)
+    p = urlparse(s)
+    kept = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True) if not junk.match(k)]
+    return urlunparse(p._replace(query=urlencode(kept)))
+
+
+def _remove_line_numbers(t: str) -> str:
+    import re
+    return "\n".join(re.sub(r"^\s*\d+[:.\)\]\s]\s?", "", ln) for ln in t.splitlines())
+
+
+def _json_pretty(t: str) -> str:
+    import json
+    try:
+        return json.dumps(json.loads(t), indent=2, ensure_ascii=False)
+    except Exception:
+        return t
+
+
+def _b64_encode(t: str) -> str:
+    import base64
+    return base64.b64encode(t.encode("utf-8")).decode("ascii")
+
+
+def _b64_decode(t: str) -> str:
+    import base64
+    try:
+        return base64.b64decode(t.strip()).decode("utf-8", "replace")
+    except Exception:
+        return t
+
+
 TRANSFORMS: dict[str, Callable[[str], str]] = {
     "plain": lambda t: t,                                  # we only store plain text anyway
     "trim": lambda t: t.strip(),
@@ -197,8 +236,13 @@ TRANSFORMS: dict[str, Callable[[str], str]] = {
     "title": lambda t: t.title(),
     "sentence": lambda t: (t[:1].upper() + t[1:]) if t else t,
     "single_line": lambda t: " ".join(t.split()),
+    "join_lines": lambda t: " ".join(ln.strip() for ln in t.splitlines() if ln.strip()),
     "collapse_blanks": _collapse_blank_lines,
-    "no_urls_tracking": lambda t: t.split("?")[0] if t.startswith(("http://", "https://")) else t,
+    "strip_tracking": _strip_tracking,
+    "remove_line_numbers": _remove_line_numbers,
+    "json_pretty": _json_pretty,
+    "base64_encode": _b64_encode,
+    "base64_decode": _b64_decode,
 }
 
 

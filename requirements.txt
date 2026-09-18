@@ -5,3 +5,5 @@ Pillow>=10.0          # image clipboard capture / conversion
 pynput>=1.7           # global hotkeys + synthetic Ctrl+V paste
 psutil>=5.9           # resolve source-app process name / path
 uiautomation>=2.0     # read the active browser tab's URL (site tracking)
+pystray>=0.19         # system tray icon
+cryptography>=41.0    # optional at-rest encryption of clip text

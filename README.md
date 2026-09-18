@@ -17,8 +17,21 @@ excellent behaviour, minus the dated looks. Python backend, web-tech UI (via
 - **Paste as ▸** — right-click any clip and paste it as **Plain / Markdown /
   BBCode / rentry**. Rich formatting from the source (bold, links, lists…) is
   captured and converted on the fly; no need to know the original format.
-- **Favorites & categories**, fuzzy search, and per-site / per-app / per-day
-  filters in the sidebar.
+- **Favorites & categories**, fuzzy search, and per-site / per-app / per-day /
+  per-**type** filters in the sidebar.
+- **Auto-tagging by content type.** Clips are labelled url / email / color /
+  phone / code / json / number / path so you can filter to just the URLs, etc.
+- **Snippets with placeholders.** Save reusable text like `Hi {name}, …`; on
+  paste it prompts to fill each blank. Right-click any clip → *Save as snippet*.
+- **More transforms.** Beyond case/trim: strip URL tracking params, join lines,
+  remove line numbers, pretty-print JSON, base64 encode/decode — from the
+  right-click *Transform & paste ▸* menu.
+- **System tray icon** — open, jump to favorites, pause capture, or quit.
+- **Privacy.** Optional at-rest encryption of clip text, auto-expiry of
+  secret-looking clips (API keys, card numbers), and never-store regex rules.
+- **Import from ClipAngel** and **sync favorites/snippets** through a shared
+  folder (Dropbox/OneDrive) — Settings has both.
+- **Beep on capture** (optional).
 - **Hotkeys** (rebindable in Settings): `Alt+V` opens the window, `Alt+B` jumps
   straight to favorites. `Enter`/double-click pastes into the app you came from,
   `1`–`9` quick-pick, `Esc` hides.
@@ -60,7 +73,12 @@ src/
   clipboard_monitor.py   background watcher (text/image/files + HTML)
   paster.py              clipboard read/write + paste-into-last-app + text transforms
   markup.py              HTML→Markdown/BBCode + Markdown↔BBCode conversion
+  detect.py              content-type tagging + secret detection
+  crypto.py              optional at-rest encryption of clip text
   hotkeys.py             global, rebindable hotkeys
+  tray.py                system tray icon
+  importers.py           import history from ClipAngel
+  sync.py                favorites/snippets sync via a shared folder
   api.py                 Python↔JS bridge
 web/
   index.html style.css app.js    the UI

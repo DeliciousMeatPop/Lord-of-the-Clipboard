@@ -7,14 +7,17 @@ Wires the pieces together:
 """
 from __future__ import annotations
 
+import threading
+
 import webview  # pywebview
 
 from . import config as cfg
-from . import source_app, storage
+from . import source_app, storage, sync
 from .api import Api
 from .clipboard_monitor import ClipboardMonitor
 from .hotkeys import HotkeyManager
 from .paths import WEB_DIR, ensure_dirs
+from .tray import Tray
 
 
 def build():
@@ -50,6 +53,7 @@ def build():
     api.monitor = monitor
 
     hk = HotkeyManager()
+    tray = Tray(accent=config.get("ui", {}).get("accent", "#7c5cff"))
 
     def summon(favorites: bool):
         # Remember which app we're pasting back into, then show + focus.
@@ -74,9 +78,41 @@ def build():
 
     api.rebind_hotkeys = rebind
 
+    def quit_app():
+        try:
+            monitor.stop()
+            hk.stop()
+        finally:
+            try:
+                window.destroy()
+            except Exception:
+                pass
+
+    def expiry_loop():
+        # Sweep out expired (secret) clips every few minutes.
+        while not monitor._stop.wait(300):
+            try:
+                storage.prune_expired()
+            except Exception:
+                pass
+
     def on_start():
+        storage.prune_expired()
+        # Optional: pull synced favorites/snippets on launch.
+        if config.get("sync", {}).get("import_on_start"):
+            try:
+                sync.import_from(config.get("sync", {}).get("folder", ""))
+            except Exception:
+                pass
         monitor.start()
         rebind()
+        threading.Thread(target=expiry_loop, daemon=True).start()
+        tray.start(
+            on_open=lambda: summon(False),
+            on_favorites=lambda: summon(True),
+            on_toggle_pause=monitor.toggle_pause,
+            on_quit=quit_app,
+        )
 
     return window, on_start
 
