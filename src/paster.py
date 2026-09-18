@@ -120,6 +120,57 @@ def sequence_number() -> int:
 
 
 # ----------------------------------------------------------------------------- write
+def _ctypes_set_text(text: str) -> bool:
+    """Write CF_UNICODETEXT the way real apps do: a GMEM_MOVEABLE global buffer
+    holding the UTF-16 string plus a null terminator, handed to the OS.
+
+    pywin32's SetClipboardData/SetClipboardText can produce a buffer that
+    clipboard viewers *show* but apps *paste as empty*; this path avoids that.
+    64-bit correctness hinges on the restype/argtypes below (otherwise ctypes
+    truncates the HGLOBAL handle to 32 bits and corrupts it).
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    u32 = ctypes.windll.user32
+    k32 = ctypes.windll.kernel32
+
+    k32.GlobalAlloc.restype = wintypes.HGLOBAL
+    k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    k32.GlobalLock.restype = wintypes.LPVOID
+    k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    k32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    u32.OpenClipboard.argtypes = [wintypes.HWND]
+    u32.SetClipboardData.restype = wintypes.HANDLE
+    u32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+
+    # Windows apps expect CRLF line endings; normalize so multi-line pastes work.
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+    buf = text.encode("utf-16-le") + b"\x00\x00"
+
+    if not u32.OpenClipboard(None):
+        return False
+    try:
+        u32.EmptyClipboard()
+        handle = k32.GlobalAlloc(GMEM_MOVEABLE, len(buf))
+        if not handle:
+            return False
+        ptr = k32.GlobalLock(handle)
+        if not ptr:
+            k32.GlobalFree(handle)
+            return False
+        ctypes.memmove(ptr, buf, len(buf))
+        k32.GlobalUnlock(handle)
+        if not u32.SetClipboardData(CF_UNICODETEXT, handle):
+            k32.GlobalFree(handle)  # only free if the OS didn't take ownership
+            return False
+        return True
+    finally:
+        u32.CloseClipboard()
+
+
 def copy_text(text: str) -> bool:
     """Put text on the clipboard. Returns True on success."""
     if not _WIN:
@@ -127,11 +178,16 @@ def copy_text(text: str) -> bool:
     text = "" if text is None else str(text)
     for _ in range(5):  # the clipboard is often briefly locked by another app
         try:
+            if _ctypes_set_text(text):
+                return True
+        except Exception:
+            pass
+        # Fallback to pywin32 if the ctypes path somehow failed.
+        try:
             win32clipboard.OpenClipboard()
             try:
                 win32clipboard.EmptyClipboard()
-                # SetClipboardText handles the UTF-16 buffer allocation reliably.
-                win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)
+                win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
             finally:
                 win32clipboard.CloseClipboard()
             return True
