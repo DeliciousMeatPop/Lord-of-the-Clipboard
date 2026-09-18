@@ -553,8 +553,12 @@
 
   /* ---------------------------------------------------------------- keyboard */
   document.addEventListener("keydown", (e) => {
-    // Ctrl+Shift+digit → numeric quick-pick (works regardless of focus)
-    if (e.ctrlKey && e.shiftKey && /^[0-9]$/.test(e.key)) { e.preventDefault(); state.pick.plain = e.altKey; feedPick(e.key); return; }
+    // Ctrl+Shift+digit → numeric quick-pick. Use e.code, because with Shift held
+    // the number-row keys report as !@#$… in e.key, not 1-9.
+    if (e.ctrlKey && e.shiftKey) {
+      const m = /^(?:Digit|Numpad)([0-9])$/.exec(e.code || "");
+      if (m) { e.preventDefault(); state.pick.plain = e.altKey; feedPick(m[1]); return; }
+    }
     if (state.pick.buffer) {
       if (e.key === "Backspace") { e.preventDefault(); state.pick.buffer = state.pick.buffer.slice(0, -1); renderPick(); return; }
       if (e.key === "Enter") { e.preventDefault(); const x = (+state.pick.buffer) - 1; if (x >= 0 && x < state.clips.length) confirmPick(x); else clearPick(); return; }
@@ -589,6 +593,15 @@
       $$(".seg").forEach(x => x.classList.remove("active")); b.classList.add("active");
       state.mode = b.dataset.mode; state.sel = 0; refresh();
     }));
+    // Let the titlebar drag the window, but keep its controls clickable:
+    // stop mousedown on interactive bits from reaching pywebview's drag handler.
+    $$("#titlebar input, #titlebar button, #titlebar select").forEach(el =>
+      el.addEventListener("mousedown", e => e.stopPropagation()));
+    $("#btn-pin").addEventListener("click", async () => {
+      const on = await api.toggle_on_top();
+      $("#btn-pin").classList.toggle("active-pin", on);
+      $("#btn-pin").title = on ? "Always on top (on)" : "Always on top (off)";
+    });
     $("#btn-close").addEventListener("click", () => hideWindow());
     $("#btn-new-snippet").addEventListener("click", async () => {
       const name = prompt("Snippet name:"); if (!name) return;
@@ -635,6 +648,8 @@
     state.config = await api.get_config();
     try { state.transforms = await api.transforms(); } catch (e) { state.transforms = []; }
     try { const v = await api.version(); const b = $(".brand"); if (b) b.title = "Lord of the Clipboard v" + v; } catch (e) {}
+    const onTop = !state.config.ui || state.config.ui.always_on_top !== false;
+    $("#btn-pin").classList.toggle("active-pin", onTop);
     applyTheme();
     wire();
     await refresh();

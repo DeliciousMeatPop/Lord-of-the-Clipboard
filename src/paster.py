@@ -19,7 +19,9 @@ try:
     import win32con
     from PIL import Image, ImageGrab
     from pynput.keyboard import Controller, Key
+    import win32api
     import win32gui
+    import win32process
     _WIN = True
 except Exception:  # pragma: no cover - non-Windows
     _WIN = False
@@ -118,10 +120,69 @@ def sequence_number() -> int:
 
 
 # ----------------------------------------------------------------------------- write
-def copy_text(text: str) -> None:
+def _ctypes_set_text(text: str) -> bool:
+    """Write CF_UNICODETEXT the way real apps do: a GMEM_MOVEABLE global buffer
+    holding the UTF-16 string plus a null terminator, handed to the OS.
+
+    pywin32's SetClipboardData/SetClipboardText can produce a buffer that
+    clipboard viewers *show* but apps *paste as empty*; this path avoids that.
+    64-bit correctness hinges on the restype/argtypes below (otherwise ctypes
+    truncates the HGLOBAL handle to 32 bits and corrupts it).
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    u32 = ctypes.windll.user32
+    k32 = ctypes.windll.kernel32
+
+    k32.GlobalAlloc.restype = wintypes.HGLOBAL
+    k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    k32.GlobalLock.restype = wintypes.LPVOID
+    k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    k32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    u32.OpenClipboard.argtypes = [wintypes.HWND]
+    u32.SetClipboardData.restype = wintypes.HANDLE
+    u32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+
+    # Windows apps expect CRLF line endings; normalize so multi-line pastes work.
+    text = text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+    buf = text.encode("utf-16-le") + b"\x00\x00"
+
+    if not u32.OpenClipboard(None):
+        return False
+    try:
+        u32.EmptyClipboard()
+        handle = k32.GlobalAlloc(GMEM_MOVEABLE, len(buf))
+        if not handle:
+            return False
+        ptr = k32.GlobalLock(handle)
+        if not ptr:
+            k32.GlobalFree(handle)
+            return False
+        ctypes.memmove(ptr, buf, len(buf))
+        k32.GlobalUnlock(handle)
+        if not u32.SetClipboardData(CF_UNICODETEXT, handle):
+            k32.GlobalFree(handle)  # only free if the OS didn't take ownership
+            return False
+        return True
+    finally:
+        u32.CloseClipboard()
+
+
+def copy_text(text: str) -> bool:
+    """Put text on the clipboard. Returns True on success."""
     if not _WIN:
-        return
-    for _ in range(3):
+        return False
+    text = "" if text is None else str(text)
+    for _ in range(5):  # the clipboard is often briefly locked by another app
+        try:
+            if _ctypes_set_text(text):
+                return True
+        except Exception:
+            pass
+        # Fallback to pywin32 if the ctypes path somehow failed.
         try:
             win32clipboard.OpenClipboard()
             try:
@@ -129,9 +190,10 @@ def copy_text(text: str) -> None:
                 win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
             finally:
                 win32clipboard.CloseClipboard()
-            return
+            return True
         except Exception:
-            time.sleep(0.05)
+            time.sleep(0.06)
+    return False
 
 
 def copy_image(path: str) -> None:
@@ -165,16 +227,33 @@ def copy_files(paths: list) -> None:
 
 # ----------------------------------------------------------------------------- paste
 def paste_into(hwnd: int, restore_focus: bool = True) -> None:
-    """Re-focus `hwnd` (the app the window was summoned from) and press Ctrl+V."""
+    """Focus the target external window and press Ctrl+V.
+
+    Windows blocks a plain SetForegroundWindow from a background thread, so we
+    briefly attach our input thread to the target's before forcing focus — the
+    trick every paste tool uses.
+    """
     if not _WIN:
         return
     try:
-        if restore_focus and hwnd:
+        if restore_focus and hwnd and win32gui.IsWindow(hwnd):
             try:
-                win32gui.SetForegroundWindow(hwnd)
+                if win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                cur = win32api.GetCurrentThreadId()
+                target = win32process.GetWindowThreadProcessId(hwnd)[0]
+                win32process.AttachThreadInput(cur, target, True)
+                try:
+                    win32gui.SetForegroundWindow(hwnd)
+                    win32gui.BringWindowToTop(hwnd)
+                finally:
+                    win32process.AttachThreadInput(cur, target, False)
             except Exception:
-                pass
-            time.sleep(0.08)  # let focus settle before the keystroke
+                try:
+                    win32gui.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+            time.sleep(0.15)  # let focus settle before the keystroke
         kb = Controller()
         with kb.pressed(Key.ctrl):
             kb.press("v")

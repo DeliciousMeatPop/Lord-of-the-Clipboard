@@ -59,11 +59,12 @@ def build():
         min_size=(520, 420),
         frameless=True,
         easy_drag=False,
-        on_top=True,
+        on_top=config.get("ui", {}).get("always_on_top", True),
         background_color="#14141c",
         hidden=True,  # lives in the background until a hotkey summons it
     )
     api.window = window
+    api._on_top = config.get("ui", {}).get("always_on_top", True)
 
     # New clips push into the UI (only matters while the window is visible).
     def on_new_clip(row):
@@ -80,7 +81,10 @@ def build():
 
     def summon(favorites: bool):
         # Remember which app we're pasting back into, then show + focus.
-        api.last_target_hwnd = source_app.get_foreground_hwnd()
+        import os
+        h = source_app.foreground_external_hwnd(os.getpid())
+        if h:
+            api.last_target_hwnd = h
         api._favorites_mode = favorites
         try:
             window.show()
@@ -139,6 +143,16 @@ def build():
             except Exception:
                 pass
 
+    def focus_tracker():
+        # Continuously remember the last external (non-LotC) window so paste
+        # always lands where the user was working — not a stale summon-time hwnd.
+        import os
+        my_pid = os.getpid()
+        while not monitor._stop.wait(0.3):
+            h = source_app.foreground_external_hwnd(my_pid)
+            if h:
+                api.last_target_hwnd = h
+
     def seed_examples():
         # One-time: drop in a couple of example snippets so the tokens are
         # discoverable. Guarded by a marker file so we never re-add them.
@@ -170,6 +184,7 @@ def build():
             rebind()
             log.info("hotkeys bound: %s", config.get("hotkeys", {}))
             threading.Thread(target=expiry_loop, daemon=True).start()
+            threading.Thread(target=focus_tracker, daemon=True).start()
             threading.Thread(target=check_update_bg, daemon=True).start()
             try:
                 tray.start(

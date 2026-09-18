@@ -8,19 +8,20 @@
 </head>
 <body>
   <!-- Title / search bar (also the window drag handle) -->
-  <header id="titlebar">
-    <div class="brand" title="Lord of the Clipboard">
+  <header id="titlebar" class="pywebview-drag-region" title="Drag to move">
+    <div class="brand">
       <span class="crown">♛</span>
     </div>
     <div class="search-wrap">
       <input id="search" type="text" placeholder="Search clips, sites, apps…  (type to filter)" autocomplete="off" spellcheck="false" />
     </div>
-    <div class="titlebar-actions no-drag">
+    <div class="titlebar-actions">
       <button id="tab-all"   class="seg active" data-mode="all">All</button>
       <button id="tab-fav"   class="seg" data-mode="fav">★ Favorites</button>
       <button id="tab-days"  class="seg" data-mode="days">By day</button>
       <button id="tab-snip"  class="seg" data-mode="snippets">✎ Snippets</button>
       <button id="btn-new-snippet" class="icon-btn" title="New snippet">＋</button>
+      <button id="btn-pin" class="icon-btn" title="Always on top">📌</button>
       <button id="btn-settings" class="icon-btn" title="Settings">⚙</button>
       <button id="btn-close" class="icon-btn" title="Hide (Esc)">✕</button>
     </div>

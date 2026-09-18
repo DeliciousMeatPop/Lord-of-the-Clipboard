@@ -235,6 +235,17 @@ class Api:
             except Exception:
                 pass
 
+    def toggle_on_top(self) -> bool:
+        """Flip always-on-top and persist it. Returns the new state."""
+        self._on_top = not getattr(self, "_on_top", True)
+        try:
+            self.window.on_top = self._on_top
+        except Exception:
+            pass
+        self.config.setdefault("ui", {})["always_on_top"] = self._on_top
+        cfg.save(self.config)
+        return self._on_top
+
     def opened_in_favorites_mode(self) -> bool:
         v, self._favorites_mode = self._favorites_mode, False
         return v
