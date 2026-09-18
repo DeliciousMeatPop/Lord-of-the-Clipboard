@@ -39,7 +39,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ----- title bar ----- */
 #titlebar {
-  -webkit-app-region: drag;                 /* frameless window drag */
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px;
   background: linear-gradient(180deg, var(--bg-2), var(--panel));
@@ -70,6 +69,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: 30px; height: 30px; border-radius: 8px; font-size: 15px;
 }
 .icon-btn:hover { background: var(--bg-3); color: var(--text); }
+.icon-btn.active-pin { color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+#titlebar { cursor: default; }
+#titlebar .brand { cursor: move; }
 
 /* ----- bars (update / stack) ----- */
 .bar {

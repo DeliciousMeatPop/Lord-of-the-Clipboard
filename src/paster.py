@@ -19,7 +19,9 @@ try:
     import win32con
     from PIL import Image, ImageGrab
     from pynput.keyboard import Controller, Key
+    import win32api
     import win32gui
+    import win32process
     _WIN = True
 except Exception:  # pragma: no cover - non-Windows
     _WIN = False
@@ -118,20 +120,24 @@ def sequence_number() -> int:
 
 
 # ----------------------------------------------------------------------------- write
-def copy_text(text: str) -> None:
+def copy_text(text: str) -> bool:
+    """Put text on the clipboard. Returns True on success."""
     if not _WIN:
-        return
-    for _ in range(3):
+        return False
+    text = "" if text is None else str(text)
+    for _ in range(5):  # the clipboard is often briefly locked by another app
         try:
             win32clipboard.OpenClipboard()
             try:
                 win32clipboard.EmptyClipboard()
-                win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+                # SetClipboardText handles the UTF-16 buffer allocation reliably.
+                win32clipboard.SetClipboardText(text, win32con.CF_UNICODETEXT)
             finally:
                 win32clipboard.CloseClipboard()
-            return
+            return True
         except Exception:
-            time.sleep(0.05)
+            time.sleep(0.06)
+    return False
 
 
 def copy_image(path: str) -> None:
@@ -165,16 +171,33 @@ def copy_files(paths: list) -> None:
 
 # ----------------------------------------------------------------------------- paste
 def paste_into(hwnd: int, restore_focus: bool = True) -> None:
-    """Re-focus `hwnd` (the app the window was summoned from) and press Ctrl+V."""
+    """Focus the target external window and press Ctrl+V.
+
+    Windows blocks a plain SetForegroundWindow from a background thread, so we
+    briefly attach our input thread to the target's before forcing focus — the
+    trick every paste tool uses.
+    """
     if not _WIN:
         return
     try:
-        if restore_focus and hwnd:
+        if restore_focus and hwnd and win32gui.IsWindow(hwnd):
             try:
-                win32gui.SetForegroundWindow(hwnd)
+                if win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                cur = win32api.GetCurrentThreadId()
+                target = win32process.GetWindowThreadProcessId(hwnd)[0]
+                win32process.AttachThreadInput(cur, target, True)
+                try:
+                    win32gui.SetForegroundWindow(hwnd)
+                    win32gui.BringWindowToTop(hwnd)
+                finally:
+                    win32process.AttachThreadInput(cur, target, False)
             except Exception:
-                pass
-            time.sleep(0.08)  # let focus settle before the keystroke
+                try:
+                    win32gui.SetForegroundWindow(hwnd)
+                except Exception:
+                    pass
+            time.sleep(0.15)  # let focus settle before the keystroke
         kb = Controller()
         with kb.pressed(Key.ctrl):
             kb.press("v")

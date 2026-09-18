@@ -59,6 +59,24 @@ def get_foreground_hwnd() -> int:
         return 0
 
 
+def foreground_external_hwnd(my_pid: int) -> int:
+    """The focused window IF it belongs to another process (else 0).
+
+    Used to continuously track the app we'd paste into, so it's correct even
+    when the window was opened from the tray or focus changed after summoning.
+    """
+    if not _WIN:
+        return 0
+    try:
+        h = win32gui.GetForegroundWindow()
+        if not h:
+            return 0
+        _, pid = win32process.GetWindowThreadProcessId(h)
+        return h if pid != my_pid else 0
+    except Exception:
+        return 0
+
+
 def _domain_from_url(url: str) -> str:
     try:
         host = urlparse(url if "://" in url else "http://" + url).netloc.lower()

@@ -41,6 +41,7 @@
     "list_preview_lines": 2,
     "quick_select_digits": true,
     "sound_on_capture": false,
-    "sticky_numbers": false
+    "sticky_numbers": false,
+    "always_on_top": true
   }
 }
