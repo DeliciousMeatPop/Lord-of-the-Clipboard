@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 from . import config as cfg
 from . import importers, markup, paster, storage, sync, templates
+from ._version import __version__
 from .paths import DATA_DIR
 
 
@@ -220,3 +221,6 @@ class Api:
 
     def transforms(self) -> list[str]:
         return list(paster.TRANSFORMS.keys())
+
+    def version(self) -> str:
+        return __version__

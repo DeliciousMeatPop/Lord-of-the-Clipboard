@@ -13,7 +13,8 @@
     sel: 0,
     config: null,
     transforms: [],              // available paste transforms
-    pick: { buffer: "", timer: null },  // Ctrl+Shift numeric quick-pick
+    pick: { buffer: "", timer: null, plain: false },  // Ctrl+Shift numeric quick-pick
+    summoned: false,             // is the window currently shown?
   };
 
   const TRANSFORM_LABELS = {
@@ -336,6 +337,7 @@
           <option value="copy"${(c.paste||{}).pick_action !== 'paste' ? ' selected' : ''}>Copy to clipboard</option>
           <option value="paste"${(c.paste||{}).pick_action === 'paste' ? ' selected' : ''}>Paste into the app</option>
         </select></div>
+      <div class="field check"><input type="checkbox" id="ui_sticky" ${ui.sticky_numbers ? 'checked' : ''}><label>Sticky numbers (don't renumber the list while it's open)</label></div>
       <hr style="border-color:var(--line)">
       <div class="side-title" style="margin:0 0 8px">Privacy</div>
       <div class="field check"><input type="checkbox" id="pv_enc" ${(c.privacy||{}).encrypt ? 'checked' : ''}><label>Encrypt clip text at rest (key kept in data/secret.key)</label></div>
@@ -377,6 +379,7 @@
     });
     c.ui = c.ui || {}; c.ui.accent = $("#ui_accent").value; c.ui.theme = $("#ui_theme").value;
     c.ui.sound_on_capture = $("#ui_sound").checked;
+    c.ui.sticky_numbers = $("#ui_sticky").checked;
     c.monitor = c.monitor || {};
     c.monitor.capture_text = $("#mon_text").checked;
     c.monitor.capture_images = $("#mon_img").checked;
@@ -429,11 +432,13 @@
   }
   async function confirmPick(i) {
     const c = state.clips[i];
+    const plain = state.pick.plain;
     clearPick();
     if (!c) return;
+    if (plain) { await paste(c.id, "plain"); return; }   // Ctrl+Shift+Alt → paste as plain
     const action = (state.config && state.config.paste && state.config.paste.pick_action) || "copy";
     if (action === "paste") { await paste(c.id); }
-    else { await api.copy_clip(c.id); if (api.hide) api.hide(); }
+    else { await api.copy_clip(c.id); hideWindow(); }
   }
   function feedPick(digit) {
     state.pick.buffer += digit;
@@ -452,7 +457,7 @@
   /* ---------------------------------------------------------------- keyboard */
   document.addEventListener("keydown", (e) => {
     // Ctrl+Shift+digit → numeric quick-pick (works regardless of focus)
-    if (e.ctrlKey && e.shiftKey && /^[0-9]$/.test(e.key)) { e.preventDefault(); feedPick(e.key); return; }
+    if (e.ctrlKey && e.shiftKey && /^[0-9]$/.test(e.key)) { e.preventDefault(); state.pick.plain = e.altKey; feedPick(e.key); return; }
     if (state.pick.buffer) {
       if (e.key === "Backspace") { e.preventDefault(); state.pick.buffer = state.pick.buffer.slice(0, -1); renderPick(); return; }
       if (e.key === "Enter") { e.preventDefault(); const x = (+state.pick.buffer) - 1; if (x >= 0 && x < state.clips.length) confirmPick(x); else clearPick(); return; }
@@ -464,7 +469,7 @@
     }
     if (!$("#ctx").classList.contains("hidden")) { if (e.key === "Escape") closeContextMenu(); return; }
 
-    if (e.key === "Escape") { api && api.hide(); return; }
+    if (e.key === "Escape") { hideWindow(); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); state.sel = Math.min(state.sel + 1, state.clips.length - 1); highlight(); return; }
     if (e.key === "ArrowUp")   { e.preventDefault(); state.sel = Math.max(state.sel - 1, 0); highlight(); return; }
     if (e.key === "Enter") { const c = selectedClip(); if (c) paste(c.id); return; }
@@ -481,7 +486,7 @@
       $$(".seg").forEach(x => x.classList.remove("active")); b.classList.add("active");
       state.mode = b.dataset.mode; state.sel = 0; refresh();
     }));
-    $("#btn-close").addEventListener("click", () => api && api.hide());
+    $("#btn-close").addEventListener("click", () => hideWindow());
     $("#btn-new-snippet").addEventListener("click", async () => {
       const name = prompt("Snippet name:"); if (!name) return;
       const content = prompt("Snippet text. Tokens: {name} fill-in · {date} {time} {clipboard} · {telegram} or {site:steamdb.info} pull a past clip:", ""); if (content === null) return;
@@ -497,10 +502,19 @@
     window.addEventListener("blur", closeContextMenu);
   }
 
+  function hideWindow() { state.summoned = false; if (api && api.hide) api.hide(); }
+
   // Called from Python.
   window.__lotc = {
-    onNewClip() { refresh(); loadSidebar(); },
+    onNewClip() {
+      // Sticky numbers: while the window is open, don't renumber the list from
+      // under you — keep the numbering frozen so muscle memory holds.
+      const sticky = state.config && state.config.ui && state.config.ui.sticky_numbers;
+      if (sticky && state.summoned) { loadSidebar(); return; }
+      refresh(); loadSidebar();
+    },
     async onSummon(favorites) {
+      state.summoned = true;
       state.mode = favorites ? "fav" : "all";
       $$(".seg").forEach(x => x.classList.toggle("active", x.dataset.mode === state.mode));
       state.sel = 0;
@@ -514,6 +528,7 @@
     api = window.pywebview.api;
     state.config = await api.get_config();
     try { state.transforms = await api.transforms(); } catch (e) { state.transforms = []; }
+    try { const v = await api.version(); const b = $(".brand"); if (b) b.title = "Lord of the Clipboard v" + v; } catch (e) {}
     applyTheme();
     wire();
     await refresh();

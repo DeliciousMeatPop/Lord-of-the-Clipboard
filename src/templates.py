@@ -54,22 +54,33 @@ def _slim(c: dict) -> dict[str, Any]:
 def resolve_token(name: str) -> dict[str, Any]:
     """Return how to fill a token.
 
-    -> {"kind": "value", "value": "..."}                     dynamic
+    -> {"kind": "value", "value": "..."}                     dynamic, or an
+                                                             indexed source pick
     -> {"kind": "source", "term": t, "candidates": [ ... ]}   pick from clips
     -> {"kind": "ask"}                                        prompt the user
+
+    Source tokens accept a trailing :N to grab the Nth-newest directly, e.g.
+    {telegram:2}, {app:telegram:2}, {site:steamdb.info:3}.
     """
     raw = (name or "").strip()
     low = raw.lower()
     if low in _DYNAMIC:
         return {"kind": "value", "value": dynamic_value(low)}
 
-    term = raw
-    if ":" in raw:
-        prefix, _, rest = raw.partition(":")
-        if prefix.lower() in ("app", "site", "source", "from"):
-            term = rest.strip()
+    parts = raw.split(":")
+    index = None
+    if len(parts) > 1 and parts[-1].strip().isdigit():
+        index = int(parts.pop().strip())
+    if parts and parts[0].lower() in ("app", "site", "source", "from"):
+        parts = parts[1:]
+    term = ":".join(parts).strip()
+    if not term:
+        return {"kind": "ask"}
 
     cands = storage.clips_from_source(term)
-    if cands:
-        return {"kind": "source", "term": term, "candidates": [_slim(c) for c in cands]}
-    return {"kind": "ask"}
+    if not cands:
+        return {"kind": "ask"}
+    if index is not None:
+        i = max(1, min(index, len(cands))) - 1   # clamp to range, 1-based
+        return {"kind": "value", "value": cands[i]["content"]}
+    return {"kind": "source", "term": term, "candidates": [_slim(c) for c in cands]}

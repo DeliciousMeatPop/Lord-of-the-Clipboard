@@ -84,6 +84,50 @@ web/
   index.html style.css app.js    the UI
 ```
 
+## Building a portable .exe (GitHub Action)
+
+A manual workflow (**Actions ▸ Build Windows exe ▸ Run workflow**) builds a
+one-dir PyInstaller bundle:
+
+1. Pick the **branch/tag** to build from in the "Use workflow from" dropdown
+   (that's the code that gets built), or set the optional `ref` input.
+2. Type the **version** — it's baked into `src/_version.py` (shown in the window
+   title / About) and into the `.exe` file properties.
+3. Optionally tick **make_release** to publish a GitHub Release with the zip.
+
+The result is uploaded as a build artifact: `LordOfTheClipboard-<version>-win64.zip`.
+Unzip anywhere and run `LordOfTheClipboard.exe` — no Python needed, and its
+`data/` folder is created next to the exe so it stays portable.
+
+To build locally instead:
+
+```bat
+pip install -r requirements.txt pyinstaller
+python packaging\make_version_file.py 0.1.0
+pyinstaller --noconfirm --onedir --windowed --name LordOfTheClipboard ^
+  --add-data "web;web" --add-data "config.default.json;." ^
+  --collect-all pywebview --collect-submodules pynput ^
+  --version-file packaging\file_version_info.txt run_app.py
+```
+
+## Snippet template tokens
+
+Inside a snippet (New snippet ＋, or right-click ▸ Save as snippet):
+
+- `{name}` — a fill-in blank you're prompted for
+- `{date}` `{time}` `{datetime}` `{clipboard}` — auto-filled
+- `{telegram}` / `{app:telegram}` / `{site:steamdb.info}` — pull a past clip
+  from that app/site (a picker lists older ones); add `:N` to grab the Nth
+  newest directly, e.g. `{telegram:2}` or `{site:steamdb.info:3}`
+
+## Numeric quick-pick
+
+Every visible clip is numbered `1..N`. Hold **Ctrl+Shift** and type a clip's
+number — matches highlight, and it fires the instant the digits can only be one
+clip. Hold **Ctrl+Shift+Alt** to paste it as plain text. Since numbering follows
+whatever's on screen, filter the sidebar first (e.g. click *telegram*) to number
+just those clips. Defaults to copy; switch to paste in Settings.
+
 ## Notes / limits
 
 - Browser-site detection reads the address bar via Windows UI Automation; it's

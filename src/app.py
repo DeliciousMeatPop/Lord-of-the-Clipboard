@@ -13,6 +13,7 @@ import webview  # pywebview
 
 from . import config as cfg
 from . import source_app, storage, sync
+from ._version import __version__
 from .api import Api
 from .clipboard_monitor import ClipboardMonitor
 from .hotkeys import HotkeyManager
@@ -28,7 +29,7 @@ def build():
     api = Api(config)
 
     window = webview.create_window(
-        title="Lord of the Clipboard",
+        title=f"Lord of the Clipboard v{__version__}",
         url=str(WEB_DIR / "index.html"),
         js_api=api,
         width=760,
@@ -96,7 +97,23 @@ def build():
             except Exception:
                 pass
 
+    def seed_examples():
+        # One-time: drop in a couple of example snippets so the tokens are
+        # discoverable. Guarded by a marker file so we never re-add them.
+        from .paths import DATA_DIR
+        marker = DATA_DIR / ".seeded"
+        if marker.exists():
+            return
+        try:
+            storage.create_snippet("log line", "{date} {time} — ")
+            storage.create_snippet("reply to telegram", "Re: {telegram}\n\n")
+            storage.create_snippet("email signoff", "Thanks,\n{name}")
+            marker.write_text("1", encoding="utf-8")
+        except Exception:
+            pass
+
     def on_start():
+        seed_examples()
         storage.prune_expired()
         # Optional: pull synced favorites/snippets on launch.
         if config.get("sync", {}).get("import_on_start"):

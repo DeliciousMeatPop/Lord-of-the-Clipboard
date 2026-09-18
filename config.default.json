@@ -35,6 +35,7 @@
     "accent": "#7c5cff",
     "list_preview_lines": 2,
     "quick_select_digits": true,
-    "sound_on_capture": false
+    "sound_on_capture": false,
+    "sticky_numbers": false
   }
 }
