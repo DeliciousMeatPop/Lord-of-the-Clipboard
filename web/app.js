@@ -15,6 +15,7 @@
     transforms: [],              // available paste transforms
     pick: { buffer: "", timer: null, plain: false },  // Ctrl+Shift numeric quick-pick
     summoned: false,             // is the window currently shown?
+    stack: [],                   // ids Ctrl+clicked into a merge stack (ordered)
   };
 
   const TRANSFORM_LABELS = {
@@ -130,7 +131,11 @@
       api.image_data_url(c.id).then(url => { const im = el.querySelector("img"); if (im && url) im.src = url; });
     }
 
-    el.addEventListener("click", () => { state.sel = i; highlight(); });
+    if (state.stack.includes(c.id)) el.classList.add("stacked");
+    el.addEventListener("click", (ev) => {
+      if (ev.ctrlKey || ev.metaKey) { toggleStack(c.id); return; }  // Ctrl+click → add to merge stack
+      state.sel = i; highlight();
+    });
     el.addEventListener("dblclick", () => paste(c.id));
     el.querySelector(".star").addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -266,7 +271,9 @@
         <div class="submenu hidden">${xfItems}</div></div>
       <div class="sep"></div>` : ""}
       <div class="item" data-copy="1">Copy to clipboard</div>
-      ${c.is_snippet ? `<div class="item" data-edit="1">Edit snippet…</div>` : `<div class="item" data-mksnip="1">Save as snippet…</div>`}
+      <div class="item" data-stack="1">${state.stack.includes(c.id) ? "Remove from stack" : "Add to merge stack"}</div>
+      ${isText ? `<div class="item" data-edit="1">Edit text…</div>` : ""}
+      ${(isText && !c.is_snippet) ? `<div class="item" data-mksnip="1">Save as snippet…</div>` : ""}
       <div class="item" data-fav="1">${c.favorite ? "Unfavorite" : "Favorite ★"}</div>
       <div class="item" data-cat="1">Set category…</div>
       <div class="sep"></div>
@@ -295,7 +302,8 @@
       if (t.dataset.xf != null) await paste(c.id, "", t.dataset.xf);
       else if (t.dataset.paste != null) await paste(c.id, t.dataset.paste);
       else if (t.dataset.copy) { await api.copy_clip(c.id); }
-      else if (t.dataset.edit) { const nt = prompt("Snippet text:", c.content || ""); if (nt !== null) { await api.update_clip_text(c.id, nt); refresh(); } }
+      else if (t.dataset.stack) { toggleStack(c.id); }
+      else if (t.dataset.edit) { editClip(c); }
       else if (t.dataset.mksnip) { const nm = prompt("Snippet name:", (c.preview || "").slice(0, 30)); if (nm) { await api.create_snippet(nm, c.content || ""); } }
       else if (t.dataset.fav) { await api.toggle_favorite(c.id); refresh(); }
       else if (t.dataset.cat) { const cat = prompt("Category:", c.category || ""); if (cat !== null) { await api.set_category(c.id, cat); refresh(); } }
@@ -358,6 +366,16 @@
       <div class="field"><label>Import history from ClipAngel</label>
         <div class="row"><input type="text" id="ca_path" placeholder="path to ClipAngel .db">
         <button class="btn" id="btn-ca-import">Import</button></div></div>
+      <hr style="border-color:var(--line)">
+      <div class="side-title" style="margin:0 0 8px">Updates</div>
+      <div class="field check"><input type="checkbox" id="up_check" ${(c.update||{}).check_on_start !== false ? 'checked' : ''}><label>Check for updates on startup</label></div>
+      <div class="field check"><input type="checkbox" id="up_auto" ${(c.update||{}).auto_install ? 'checked' : ''}><label>Download &amp; install updates automatically</label></div>
+      <div class="field"><label>Update source (GitHub owner/repo)</label>
+        <input type="text" id="up_repo" value="${esc((c.update||{}).repo || '')}"></div>
+      <div class="row" style="display:flex;gap:8px;margin-bottom:12px">
+        <button class="btn" id="btn-check-update">Check for updates now</button>
+        <span id="update-check-msg" class="hint"></span>
+      </div>
       <button class="btn" id="btn-clear-history">Clear history (keep favorites)</button>`;
     $("#settings").classList.remove("hidden");
     $("#btn-clear-history").onclick = async () => { await api.clear_history(true); refresh(); loadSidebar(); };
@@ -365,6 +383,13 @@
     $("#btn-sync-import").onclick = async () => { const r = await api.sync_import(); alert(r.ok ? `Imported ${r.added} new items.` : `Error: ${r.error}`); refresh(); loadSidebar(); };
     (async () => { const p = await api.clipangel_default_path(); if (p && !$("#ca_path").value) $("#ca_path").value = p; })();
     $("#btn-ca-import").onclick = async () => { const r = await api.import_clipangel($("#ca_path").value.trim()); alert(r.ok ? `Imported ${r.imported} clips from ClipAngel.` : `Error: ${r.error}`); refresh(); loadSidebar(); };
+    $("#btn-check-update").onclick = async () => {
+      const msg = $("#update-check-msg"); msg.textContent = "Checking…";
+      const r = await api.check_update();
+      if (!r.ok) { msg.textContent = "Error: " + (r.error || "unknown"); return; }
+      if (r.available) { msg.textContent = `v${r.latest} available!`; $("#settings").classList.add("hidden"); showUpdate(r); }
+      else { msg.textContent = `Up to date (v${r.current}).`; }
+    };
   }
   async function saveSettings() {
     const c = JSON.parse(JSON.stringify(state.config || {}));
@@ -394,6 +419,10 @@
     c.sync = c.sync || {};
     c.sync.folder = $("#sy_folder").value.trim();
     c.sync.import_on_start = $("#sy_start").checked;
+    c.update = c.update || {};
+    c.update.check_on_start = $("#up_check").checked;
+    c.update.auto_install = $("#up_auto").checked;
+    c.update.repo = $("#up_repo").value.trim();
     state.config = await api.save_config(c);
     applyTheme();
     $("#settings").classList.add("hidden");
@@ -402,6 +431,74 @@
     const ui = (state.config && state.config.ui) || {};
     document.documentElement.dataset.theme = ui.theme === "light" ? "light" : "dark";
     if (ui.accent) document.documentElement.style.setProperty("--accent", ui.accent);
+  }
+
+  /* ---------------------------------------------------------------- merge stack */
+  function toggleStack(id) {
+    const i = state.stack.indexOf(id);
+    if (i >= 0) state.stack.splice(i, 1); else state.stack.push(id);
+    $$(".clip").forEach(el => {
+      const cid = state.clips[+el.dataset.i] && state.clips[+el.dataset.i].id;
+      el.classList.toggle("stacked", state.stack.includes(cid));
+    });
+    renderStackbar();
+  }
+  function renderStackbar() {
+    const bar = $("#stackbar");
+    if (!state.stack.length) { bar.classList.add("hidden"); return; }
+    bar.classList.remove("hidden");
+    $("#stack-count").textContent = `${state.stack.length} clip${state.stack.length > 1 ? "s" : ""} stacked`;
+  }
+  async function pasteStack() {
+    if (!state.stack.length) return;
+    const sep = $("#stack-sep").value;
+    const ids = [...state.stack];
+    state.stack = []; renderStackbar();
+    await api.paste_many(ids, sep);
+  }
+
+  /* ---------------------------------------------------------------- pin bar (F1–F9) */
+  async function loadPinbar() {
+    if (!api) return;
+    const favs = await api.list_clips({ favorites_only: true, limit: 9, sort: "used" });
+    const bar = $("#pinbar");
+    bar.innerHTML = favs.map((c, i) =>
+      `<div class="pin" data-pin="${c.id}" title="F${i + 1} — ${esc(c.preview || "")}">
+        <span class="fkey">F${i + 1}</span><span class="ptext">${esc(c.preview || c.name || "")}</span></div>`).join("");
+    state.pins = favs;
+    bar.querySelectorAll(".pin").forEach(el =>
+      el.addEventListener("click", () => paste(+el.dataset.pin)));
+  }
+
+  /* ---------------------------------------------------------------- in-place editor */
+  function editClip(clip) {
+    const ov = document.createElement("div");
+    ov.className = "modal";
+    ov.innerHTML = `<div class="modal-card"><div class="modal-head"><h2>Edit ${clip.is_snippet ? "snippet" : "clip"}</h2>
+      <button class="icon-btn" data-cancel>✕</button></div>
+      <div class="modal-body"><textarea id="edit-area" style="width:100%;min-height:220px;padding:10px;border-radius:8px;border:1px solid var(--line);background:var(--bg-3);color:var(--text);font:inherit"></textarea></div>
+      <div class="modal-foot"><button class="btn primary" data-save>Save</button><button class="btn" data-cancel>Cancel</button></div></div>`;
+    document.body.appendChild(ov);
+    const ta = ov.querySelector("#edit-area");
+    ta.value = clip.content || "";
+    ta.focus();
+    ov.addEventListener("click", async (ev) => {
+      if (ev.target.closest("[data-cancel]") || ev.target === ov) { ov.remove(); return; }
+      if (ev.target.closest("[data-save]")) { await api.update_clip_text(clip.id, ta.value); ov.remove(); refresh(); loadSidebar(); loadPinbar(); }
+    });
+  }
+
+  /* ---------------------------------------------------------------- update banner */
+  function showUpdate(info) {
+    const bar = $("#updatebar");
+    $("#update-text").textContent = `Update available: v${info.latest} (you have v${info.current})`;
+    bar.classList.remove("hidden");
+    $("#update-install").onclick = async () => {
+      $("#update-text").textContent = "Downloading update…";
+      const r = await api.install_update(info.url);
+      if (!r.ok) { $("#update-text").textContent = "Update failed: " + (r.error || "unknown"); }
+    };
+    $("#update-later").onclick = () => bar.classList.add("hidden");
   }
 
   /* ---------------------------------------------------------------- quick-pick
@@ -472,7 +569,13 @@
     if (e.key === "Escape") { hideWindow(); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); state.sel = Math.min(state.sel + 1, state.clips.length - 1); highlight(); return; }
     if (e.key === "ArrowUp")   { e.preventDefault(); state.sel = Math.max(state.sel - 1, 0); highlight(); return; }
-    if (e.key === "Enter") { const c = selectedClip(); if (c) paste(c.id); return; }
+    if (e.key === "Enter") {
+      if (state.stack.length) { e.preventDefault(); pasteStack(); return; }  // Enter pastes the stack if one exists
+      const c = selectedClip(); if (c) paste(c.id); return;
+    }
+    // F1–F9 → paste the matching pinned favorite
+    const fmatch = /^F([1-9])$/.exec(e.key);
+    if (fmatch) { const p = (state.pins || [])[+fmatch[1] - 1]; if (p) { e.preventDefault(); paste(p.id); } }
   });
 
   /* ---------------------------------------------------------------- wiring */
@@ -498,6 +601,8 @@
     $("#settings-close").addEventListener("click", () => $("#settings").classList.add("hidden"));
     $("#settings-cancel").addEventListener("click", () => $("#settings").classList.add("hidden"));
     $("#settings-save").addEventListener("click", saveSettings);
+    $("#stack-paste").addEventListener("click", pasteStack);
+    $("#stack-clear").addEventListener("click", () => { state.stack = []; renderStackbar(); $$(".clip").forEach(el => el.classList.remove("stacked")); });
     document.addEventListener("click", (e) => { if (!e.target.closest("#ctx")) closeContextMenu(); });
     window.addEventListener("blur", closeContextMenu);
   }
@@ -511,15 +616,16 @@
       // under you — keep the numbering frozen so muscle memory holds.
       const sticky = state.config && state.config.ui && state.config.ui.sticky_numbers;
       if (sticky && state.summoned) { loadSidebar(); return; }
-      refresh(); loadSidebar();
+      refresh(); loadSidebar(); loadPinbar();
     },
+    onUpdate(info) { showUpdate(info); },
     async onSummon(favorites) {
       state.summoned = true;
       state.mode = favorites ? "fav" : "all";
       $$(".seg").forEach(x => x.classList.toggle("active", x.dataset.mode === state.mode));
       state.sel = 0;
       const s = $("#search"); s.value = ""; state.filters.query = "";
-      await refresh(); await loadSidebar();
+      await refresh(); await loadSidebar(); await loadPinbar();
       s.focus();
     },
   };
@@ -533,6 +639,7 @@
     wire();
     await refresh();
     await loadSidebar();
+    await loadPinbar();
     $("#search").focus();
   }
 

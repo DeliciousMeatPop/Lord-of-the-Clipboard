@@ -24,6 +24,11 @@
     "folder": "",
     "import_on_start": false
   },
+  "update": {
+    "repo": "DeliciousMeatPop/Lord-of-the-Clipboard",
+    "check_on_start": true,
+    "auto_install": false
+  },
   "paste": {
     "restore_focus": true,
     "paste_on_enter": true,

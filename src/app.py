@@ -83,11 +83,31 @@ def build():
         try:
             monitor.stop()
             hk.stop()
+            tray.stop()
         finally:
             try:
                 window.destroy()
             except Exception:
                 pass
+
+    api.quit_app = quit_app
+
+    def check_update_bg():
+        from . import updater
+        upd = config.get("update", {})
+        if not upd.get("check_on_start"):
+            return
+        info = updater.check(upd.get("repo", ""))
+        if info.get("ok") and info.get("available"):
+            if upd.get("auto_install") and info.get("url") and updater.is_frozen():
+                api.install_update(info["url"])
+            else:
+                try:
+                    import json as _json
+                    window.evaluate_js(
+                        "window.__lotc && window.__lotc.onUpdate(" + _json.dumps(info) + ")")
+                except Exception:
+                    pass
 
     def expiry_loop():
         # Sweep out expired (secret) clips every few minutes.
@@ -124,6 +144,7 @@ def build():
         monitor.start()
         rebind()
         threading.Thread(target=expiry_loop, daemon=True).start()
+        threading.Thread(target=check_update_bg, daemon=True).start()
         tray.start(
             on_open=lambda: summon(False),
             on_favorites=lambda: summon(True),

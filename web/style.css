@@ -71,6 +71,30 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .icon-btn:hover { background: var(--bg-3); color: var(--text); }
 
+/* ----- bars (update / stack) ----- */
+.bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-2));
+  font-size: 13px;
+}
+.bar-actions { display: flex; align-items: center; gap: 8px; }
+.btn.sm { padding: 5px 10px; font-size: 12.5px; }
+.sep-label { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.sep-label select { padding: 3px 6px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg-3); color: var(--text); }
+
+/* ----- pin bar ----- */
+.pinbar { display: flex; gap: 6px; padding: 6px 10px; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--bg-2); }
+.pinbar:empty { display: none; }
+.pin {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0; max-width: 180px;
+  padding: 5px 9px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--bg-3); color: var(--text); font-size: 12px; cursor: pointer;
+}
+.pin:hover { border-color: var(--accent); }
+.pin .fkey { color: var(--accent); font-weight: 700; font-size: 11px; }
+.pin .ptext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ----- layout ----- */
 #main { flex: 1; display: flex; min-height: 0; }
 #sidebar {
@@ -112,6 +136,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .clip:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 .clip.sel { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+.clip.stacked { border-color: var(--star); background: color-mix(in srgb, var(--star) 12%, var(--bg-2)); }
+.clip.stacked .idx::after { content: "✓"; color: var(--star); }
 .clip .idx { color: var(--muted-2); font-size: 12px; text-align: center; padding-top: 2px; font-variant-numeric: tabular-nums; }
 /* numeric quick-pick highlighting */
 .clip.pick-dim { opacity: .32; }

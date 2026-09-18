@@ -9,7 +9,7 @@ import base64
 from typing import Any, Optional
 
 from . import config as cfg
-from . import importers, markup, paster, storage, sync, templates
+from . import importers, markup, paster, storage, sync, templates, updater
 from ._version import __version__
 from .paths import DATA_DIR
 
@@ -144,6 +144,27 @@ class Api:
         self._put_on_clipboard(clip, target_format, transform)
         return self._finish_paste(clip_id)
 
+    def paste_many(self, clip_ids: list, sep: str = "\n") -> bool:
+        """Merge/stack paste: join several text clips and paste them at once."""
+        parts = []
+        for cid in clip_ids or []:
+            clip = storage.get_clip(cid)
+            if clip and clip["type"] == "text":
+                parts.append(clip["content"] or "")
+                storage.mark_used(cid)
+        if not parts:
+            return False
+        paster.copy_text(sep.join(parts))
+        if self.monitor:
+            self.monitor.note_self_write()
+        if self.config.get("paste", {}).get("hide_after_paste", True):
+            self.hide()
+        paster.paste_into(
+            self.last_target_hwnd,
+            restore_focus=self.config.get("paste", {}).get("restore_focus", True),
+        )
+        return True
+
     def paste_snippet(self, clip_id: int, values: dict = None) -> bool:
         """Fill {placeholders} in a snippet and paste the result."""
         clip = storage.get_clip(clip_id)
@@ -174,13 +195,8 @@ class Api:
         return templates.resolve_token(name)
 
     def update_clip_text(self, clip_id: int, content: str) -> None:
-        """Edit a snippet/clip's text in place (re-encrypting if needed)."""
-        clip = storage.get_clip(clip_id)
-        if not clip:
-            return
-        storage.delete_clip(clip_id)
-        if clip.get("is_snippet"):
-            storage.create_snippet(clip.get("name") or "snippet", content)
+        """Edit any text clip's body in place (keeps id, favorite, timestamps)."""
+        storage.update_content(clip_id, content)
 
     def clipangel_default_path(self) -> str:
         return importers.default_db_path() or ""
@@ -193,6 +209,23 @@ class Api:
 
     def sync_import(self) -> dict:
         return sync.import_from(self.config.get("sync", {}).get("folder", ""))
+
+    # -- auto-update --------------------------------------------------------
+    def check_update(self) -> dict:
+        return updater.check(self.config.get("update", {}).get("repo", ""))
+
+    def install_update(self, url: str) -> dict:
+        """Download + stage the update, then swap it in and relaunch."""
+        st = updater.stage(url)
+        if not st.get("ok"):
+            return st
+        applied = updater.apply(st["staged"])
+        if applied.get("ok"):
+            # Hand off to the batch and shut ourselves down so it can replace us.
+            quit_fn = getattr(self, "quit_app", None)
+            if callable(quit_fn):
+                quit_fn()
+        return applied
 
     # -- window / config ----------------------------------------------------
     def hide(self) -> None:

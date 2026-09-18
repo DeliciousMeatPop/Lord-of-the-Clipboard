@@ -32,6 +32,12 @@ excellent behaviour, minus the dated looks. Python backend, web-tech UI (via
 - **Import from ClipAngel** and **sync favorites/snippets** through a shared
   folder (Dropbox/OneDrive) — Settings has both.
 - **Beep on capture** (optional).
+- **Merge/stack paste** — Ctrl+click clips to stack them, then paste all at once
+  joined by newline / space / comma (Enter pastes the stack).
+- **F1–F9 pin bar** — your top favorites sit in a bar; F1–F9 paste them instantly.
+- **In-place editor** — right-click ▸ *Edit text* to change any clip's body.
+- **Auto-update** — checks GitHub Releases on startup and offers a one-click
+  update that downloads the newest build and swaps it in (packaged builds only).
 - **Hotkeys** (rebindable in Settings): `Alt+V` opens the window, `Alt+B` jumps
   straight to favorites. `Enter`/double-click pastes into the app you came from,
   `1`–`9` quick-pick, `Esc` hides.
@@ -75,6 +81,8 @@ src/
   markup.py              HTML→Markdown/BBCode + Markdown↔BBCode conversion
   detect.py              content-type tagging + secret detection
   crypto.py              optional at-rest encryption of clip text
+  templates.py           snippet token resolution ({date}, {telegram}, …)
+  updater.py             auto-update from GitHub Releases
   hotkeys.py             global, rebindable hotkeys
   tray.py                system tray icon
   importers.py           import history from ClipAngel

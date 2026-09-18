@@ -26,6 +26,18 @@
     </div>
   </header>
 
+  <!-- Update banner -->
+  <div id="updatebar" class="bar hidden no-drag">
+    <span id="update-text"></span>
+    <span class="bar-actions">
+      <button id="update-install" class="btn primary sm">Update now</button>
+      <button id="update-later" class="btn sm">Later</button>
+    </span>
+  </div>
+
+  <!-- Pin bar: F1–F9 favorites -->
+  <div id="pinbar" class="pinbar no-drag"></div>
+
   <div id="main">
     <!-- Filter sidebar -->
     <aside id="sidebar" class="no-drag">
@@ -51,10 +63,27 @@
     <main id="list" class="no-drag" tabindex="0"></main>
   </div>
 
+  <!-- Stack bar: shown while clips are Ctrl+clicked into a merge stack -->
+  <div id="stackbar" class="bar hidden no-drag">
+    <span id="stack-count"></span>
+    <span class="bar-actions">
+      <label class="sep-label">join with
+        <select id="stack-sep">
+          <option value="&#10;">new line</option>
+          <option value=" ">space</option>
+          <option value=", ">comma</option>
+          <option value="&#10;&#10;">blank line</option>
+        </select>
+      </label>
+      <button id="stack-paste" class="btn primary sm">Paste stack</button>
+      <button id="stack-clear" class="btn sm">Clear</button>
+    </span>
+  </div>
+
   <footer id="statusbar">
     <span id="active-filters"></span>
     <span id="pick-status" class="pick-status"></span>
-    <span class="hint">Enter paste · right-click “Paste as / Transform” · Ctrl+Shift+number to pick · Esc hide</span>
+    <span class="hint">Enter paste · Ctrl+click to stack · F1–F9 pins · Ctrl+Shift+number to pick · Esc hide</span>
   </footer>
 
   <!-- Context menu -->

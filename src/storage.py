@@ -17,7 +17,7 @@ import sqlite3
 import time
 from typing import Any, Optional
 
-from . import crypto, paths
+from . import crypto, detect, paths
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS clips (
@@ -147,6 +147,24 @@ def get_clip(clip_id: int) -> Optional[dict[str, Any]]:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM clips WHERE id = ?", (clip_id,)).fetchone()
         return _decrypt_row(dict(row)) if row else None
+
+
+def update_content(clip_id: int, content: str) -> None:
+    """Edit a text clip's body in place (re-tagging + re-encrypting as needed)."""
+    with _connect() as conn:
+        row = conn.execute("SELECT type, encrypted FROM clips WHERE id = ?", (clip_id,)).fetchone()
+        if not row or row["type"] != "text":
+            return
+        ctype = detect.content_type(content)
+        stored, enc = content, 0
+        if row["encrypted"]:
+            stored, ok = crypto.encrypt(content)
+            enc = 1 if ok else 0
+        conn.execute(
+            "UPDATE clips SET content = ?, preview = ?, content_type = ?, encrypted = ?, "
+            "html = NULL, hash = ? WHERE id = ?",
+            (stored, content[:400], ctype, enc, _hash("text", content), clip_id),
+        )
 
 
 def list_clips(
