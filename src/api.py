@@ -6,10 +6,11 @@ data. The app wires in the live window, config, and monitor after construction.
 from __future__ import annotations
 
 import base64
+import os
 from typing import Any, Optional
 
 from . import config as cfg
-from . import importers, markup, paster, storage, sync, templates, updater
+from . import importers, markup, paster, source_app, storage, sync, templates, updater
 from ._version import __version__
 from .paths import DATA_DIR
 
@@ -235,11 +236,25 @@ class Api:
             except Exception:
                 pass
 
+    def _own_hwnd(self) -> int:
+        return source_app.get_own_hwnd(os.getpid(), "Lord of the Clipboard")
+
+    def apply_topmost(self) -> None:
+        """Apply the current on-top state natively (no pywebview window poking)."""
+        paster.set_topmost(self._own_hwnd(), getattr(self, "_on_top", True))
+
+    def start_window_drag(self) -> None:
+        paster.begin_native_drag(self._own_hwnd())
+
     def toggle_on_top(self) -> bool:
-        """Flip always-on-top and persist it. Returns the new state."""
+        """Flip always-on-top via native SetWindowPos and persist it.
+
+        We must NOT touch pywebview's window.on_top here — doing so from the
+        JS-bridge thread walks the native .NET window object and crashes.
+        """
         self._on_top = not getattr(self, "_on_top", True)
         try:
-            self.window.on_top = self._on_top
+            self.apply_topmost()
         except Exception:
             pass
         self.config.setdefault("ui", {})["always_on_top"] = self._on_top

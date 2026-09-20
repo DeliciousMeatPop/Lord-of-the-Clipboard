@@ -59,6 +59,36 @@ def get_foreground_hwnd() -> int:
         return 0
 
 
+def get_own_hwnd(my_pid: int, title_contains: str = "") -> int:
+    """Find our own top-level window handle (for native drag / topmost).
+
+    We look it up by PID + title rather than touching pywebview's window object,
+    because poking that object's .NET internals from a worker thread crashes.
+    """
+    if not _WIN:
+        return 0
+    found: list[int] = []
+
+    def _cb(h, _):
+        try:
+            if not win32gui.IsWindowVisible(h):
+                return True
+            _, pid = win32process.GetWindowThreadProcessId(h)
+            if pid == my_pid:
+                title = win32gui.GetWindowText(h) or ""
+                if not title_contains or title_contains in title:
+                    found.append(h)
+        except Exception:
+            pass
+        return True
+
+    try:
+        win32gui.EnumWindows(_cb, None)
+    except Exception:
+        pass
+    return found[0] if found else 0
+
+
 def foreground_external_hwnd(my_pid: int) -> int:
     """The focused window IF it belongs to another process (else 0).
 

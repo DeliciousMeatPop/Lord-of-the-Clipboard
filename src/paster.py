@@ -225,6 +225,38 @@ def copy_files(paths: list) -> None:
     copy_text("\n".join(paths))
 
 
+# ----------------------------------------------------------------------------- window
+def begin_native_drag(hwnd: int) -> None:
+    """Start the OS window-move loop (as if the titlebar were grabbed).
+
+    This is the reliable way to drag a frameless window — Windows handles the
+    move natively, no per-mouse-move bridge calls.
+    """
+    if not _WIN or not hwnd:
+        return
+    try:
+        WM_NCLBUTTONDOWN = 0x00A1
+        HTCAPTION = 2
+        win32gui.ReleaseCapture()
+        win32gui.SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
+    except Exception:
+        pass
+
+
+def set_topmost(hwnd: int, on: bool) -> None:
+    """Toggle always-on-top via SetWindowPos (safe from any thread)."""
+    if not _WIN or not hwnd:
+        return
+    try:
+        HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE = 0x0002, 0x0001, 0x0010
+        win32gui.SetWindowPos(
+            hwnd, HWND_TOPMOST if on else HWND_NOTOPMOST,
+            0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+    except Exception:
+        pass
+
+
 # ----------------------------------------------------------------------------- paste
 def paste_into(hwnd: int, restore_focus: bool = True) -> None:
     """Focus the target external window and press Ctrl+V.
