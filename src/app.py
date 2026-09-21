@@ -59,17 +59,18 @@ def build():
         min_size=(520, 420),
         frameless=True,
         easy_drag=False,
-        on_top=config.get("ui", {}).get("always_on_top", True),
         background_color="#14141c",
         hidden=True,  # lives in the background until a hotkey summons it
     )
     api.window = window
+    # Always-on-top is handled natively (SetWindowPos), never via pywebview's
+    # window.on_top — poking that from a worker thread crashes.
     api._on_top = config.get("ui", {}).get("always_on_top", True)
 
     # New clips push into the UI (only matters while the window is visible).
     def on_new_clip(row):
         try:
-            window.evaluate_js("window.__lotc && window.__lotc.onNewClip()")
+            window.evaluate_js("try{window.__lotc&&window.__lotc.onNewClip()}catch(e){}")
         except Exception:
             pass
 
@@ -88,8 +89,14 @@ def build():
         api._favorites_mode = favorites
         try:
             window.show()
+            # Apply always-on-top natively once the window is visible.
+            try:
+                api.apply_topmost()
+            except Exception:
+                pass
+            # void(...) so evaluate_js returns nothing to serialize.
             window.evaluate_js(
-                f"window.__lotc && window.__lotc.onSummon({str(favorites).lower()})"
+                f"try{{window.__lotc&&window.__lotc.onSummon({str(favorites).lower()})}}catch(e){{}}"
             )
         except Exception:
             pass
@@ -131,7 +138,8 @@ def build():
                 try:
                     import json as _json
                     window.evaluate_js(
-                        "window.__lotc && window.__lotc.onUpdate(" + _json.dumps(info) + ")")
+                        "try{window.__lotc&&window.__lotc.onUpdate("
+                        + _json.dumps(info) + ")}catch(e){}")
                 except Exception:
                     pass
 
