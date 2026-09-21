@@ -1,27 +1,55 @@
 """The bridge exposed to the web UI as `window.pywebview.api.*`.
 
-Every method here is callable from JavaScript and returns JSON-serialisable
-data. The app wires in the live window, config, and monitor after construction.
+IMPORTANT: the object passed to pywebview as `js_api` must not hold any
+reference to the pywebview window, the monitor threads, or any other
+non-JSON object. pywebview walks the exposed object when marshalling calls,
+and reaching `window.native` (the WebView2 COM tree) sends it into infinite
+recursion / cross-thread COM errors — which is what froze the UI on every
+click. So all live objects live in the module-level CTX, and the window is
+fetched on demand from `webview.windows`.
+
+Long/native actions (paste, focus, topmost) run on a worker thread so a JS
+call never blocks the UI thread.
 """
 from __future__ import annotations
 
 import base64
 import os
+import threading
 from typing import Any, Optional
+
+import webview
 
 from . import config as cfg
 from . import importers, markup, paster, source_app, storage, sync, templates, updater
 from ._version import __version__
 from .paths import DATA_DIR
 
+# Live, non-serializable state — deliberately NOT stored on the exposed Api.
+CTX: dict[str, Any] = {
+    "monitor": None,        # ClipboardMonitor
+    "last_target_hwnd": 0,  # external window we paste into
+    "on_top": True,
+    "favorites_mode": False,
+    "quit": None,           # callable to quit the app
+    "rebind": None,         # callable to re-register hotkeys
+}
+
+
+def _window():
+    try:
+        return webview.windows[0]
+    except Exception:
+        return None
+
+
+def _async(fn) -> None:
+    threading.Thread(target=fn, daemon=True).start()
+
 
 class Api:
     def __init__(self, config: dict):
-        self.config = config
-        self.window = None                 # set by app after window creation
-        self.monitor = None                # set by app; used to skip self-writes
-        self.last_target_hwnd = 0          # app the window was summoned from
-        self._favorites_mode = False       # did we open via the favorites hotkey?
+        self.config = config  # a plain JSON dict — safe for pywebview to see
 
     # -- reads --------------------------------------------------------------
     def list_clips(self, opts: Optional[dict] = None) -> list[dict[str, Any]]:
@@ -45,7 +73,8 @@ class Api:
         if different, its last-used-day (tagged so the UI can label each)."""
         import datetime as _dt
 
-        rows = self.list_clips({**(opts or {}), "sort": "created", "limit": (opts or {}).get("limit", 1000)})
+        rows = self.list_clips({**(opts or {}), "sort": "created",
+                                "limit": (opts or {}).get("limit", 1000)})
         buckets: dict[str, list[dict]] = {}
 
         def day_of(epoch: float) -> str:
@@ -93,7 +122,6 @@ class Api:
             return ""
 
     def preview_markup(self, clip_id: int, target: str) -> str:
-        """What the text would look like pasted as `target` — for the menu/preview."""
         clip = storage.get_clip(clip_id)
         return markup.to_markup(clip, target) if clip else ""
 
@@ -125,78 +153,73 @@ class Api:
             paster.copy_image(str(DATA_DIR / clip["content"]))
         elif clip["type"] == "files":
             paster.copy_files((clip["content"] or "").split("\n"))
-        if self.monitor:
-            self.monitor.note_self_write()
+        mon = CTX.get("monitor")
+        if mon:
+            mon.note_self_write()
 
     def copy_clip(self, clip_id: int, target_format: str = "", transform: str = "") -> bool:
-        """Put a clip on the clipboard without pasting (and mark it used → top)."""
         clip = storage.get_clip(clip_id)
         if not clip:
             return False
-        self._put_on_clipboard(clip, target_format, transform)
-        storage.mark_used(clip_id)
+        _async(lambda: (self._put_on_clipboard(clip, target_format, transform),
+                        storage.mark_used(clip_id)))
         return True
 
     def paste_clip(self, clip_id: int, target_format: str = "", transform: str = "") -> bool:
-        """Copy the clip (optionally reformatted/transformed) then paste into the summoning app."""
         clip = storage.get_clip(clip_id)
         if not clip:
             return False
-        self._put_on_clipboard(clip, target_format, transform)
-        return self._finish_paste(clip_id)
+        _async(lambda: self._do_paste(clip, clip_id, target_format, transform))
+        return True
 
     def paste_many(self, clip_ids: list, sep: str = "\n") -> bool:
-        """Merge/stack paste: join several text clips and paste them at once."""
-        parts = []
-        for cid in clip_ids or []:
-            clip = storage.get_clip(cid)
-            if clip and clip["type"] == "text":
-                parts.append(clip["content"] or "")
-                storage.mark_used(cid)
-        if not parts:
+        clips = [storage.get_clip(cid) for cid in (clip_ids or [])]
+        clips = [c for c in clips if c and c["type"] == "text"]
+        if not clips:
             return False
-        paster.copy_text(sep.join(parts))
-        if self.monitor:
-            self.monitor.note_self_write()
-        if self.config.get("paste", {}).get("hide_after_paste", True):
-            self.hide()
-        paster.paste_into(
-            self.last_target_hwnd,
-            restore_focus=self.config.get("paste", {}).get("restore_focus", True),
-        )
+
+        def work():
+            paster.copy_text(sep.join(c["content"] or "" for c in clips))
+            mon = CTX.get("monitor")
+            if mon:
+                mon.note_self_write()
+            for c in clips:
+                storage.mark_used(c["id"])
+            self._deliver_paste()
+        _async(work)
         return True
 
     def paste_snippet(self, clip_id: int, values: dict = None) -> bool:
-        """Fill {placeholders} in a snippet and paste the result."""
         clip = storage.get_clip(clip_id)
         if not clip:
             return False
         text = clip.get("content") or ""
         for key, val in (values or {}).items():
             text = text.replace("{" + key + "}", val)
-        self._put_on_clipboard(clip, override_text=text)
-        return self._finish_paste(clip_id)
+        _async(lambda: self._do_paste(clip, clip_id, override_text=text))
+        return True
 
-    def _finish_paste(self, clip_id: int) -> bool:
+    def _do_paste(self, clip, clip_id, target_format="", transform="", override_text=None):
+        self._put_on_clipboard(clip, target_format, transform, override_text)
         storage.mark_used(clip_id)
+        self._deliver_paste()
+
+    def _deliver_paste(self):
         if self.config.get("paste", {}).get("hide_after_paste", True):
             self.hide()
         paster.paste_into(
-            self.last_target_hwnd,
+            CTX.get("last_target_hwnd", 0),
             restore_focus=self.config.get("paste", {}).get("restore_focus", True),
         )
-        return True
 
     # -- snippets / templates / import / sync -------------------------------
     def create_snippet(self, name: str, content: str) -> int:
         return storage.create_snippet(name, content)
 
     def resolve_token(self, name: str) -> dict:
-        """Resolve a snippet {token}: dynamic value, source candidates, or ask."""
         return templates.resolve_token(name)
 
     def update_clip_text(self, clip_id: int, content: str) -> None:
-        """Edit any text clip's body in place (keeps id, favorite, timestamps)."""
         storage.update_content(clip_id, content)
 
     def clipangel_default_path(self) -> str:
@@ -216,23 +239,22 @@ class Api:
         return updater.check(self.config.get("update", {}).get("repo", ""))
 
     def install_update(self, url: str) -> dict:
-        """Download + stage the update, then swap it in and relaunch."""
         st = updater.stage(url)
         if not st.get("ok"):
             return st
         applied = updater.apply(st["staged"])
         if applied.get("ok"):
-            # Hand off to the batch and shut ourselves down so it can replace us.
-            quit_fn = getattr(self, "quit_app", None)
+            quit_fn = CTX.get("quit")
             if callable(quit_fn):
                 quit_fn()
         return applied
 
     # -- window / config ----------------------------------------------------
     def hide(self) -> None:
-        if self.window:
+        win = _window()
+        if win:
             try:
-                self.window.hide()
+                win.hide()
             except Exception:
                 pass
 
@@ -240,29 +262,19 @@ class Api:
         return source_app.get_own_hwnd(os.getpid(), "Lord of the Clipboard")
 
     def apply_topmost(self) -> None:
-        """Apply the current on-top state natively (no pywebview window poking)."""
-        paster.set_topmost(self._own_hwnd(), getattr(self, "_on_top", True))
-
-    def start_window_drag(self) -> None:
-        paster.begin_native_drag(self._own_hwnd())
+        paster.set_topmost(self._own_hwnd(), CTX.get("on_top", True))
 
     def toggle_on_top(self) -> bool:
-        """Flip always-on-top via native SetWindowPos and persist it.
-
-        We must NOT touch pywebview's window.on_top here — doing so from the
-        JS-bridge thread walks the native .NET window object and crashes.
-        """
-        self._on_top = not getattr(self, "_on_top", True)
-        try:
-            self.apply_topmost()
-        except Exception:
-            pass
-        self.config.setdefault("ui", {})["always_on_top"] = self._on_top
+        """Flip always-on-top via native SetWindowPos (never pywebview's window)."""
+        CTX["on_top"] = not CTX.get("on_top", True)
+        _async(self.apply_topmost)
+        self.config.setdefault("ui", {})["always_on_top"] = CTX["on_top"]
         cfg.save(self.config)
-        return self._on_top
+        return CTX["on_top"]
 
     def opened_in_favorites_mode(self) -> bool:
-        v, self._favorites_mode = self._favorites_mode, False
+        v = CTX.get("favorites_mode", False)
+        CTX["favorites_mode"] = False
         return v
 
     def get_config(self) -> dict:
@@ -272,8 +284,7 @@ class Api:
         self.config.clear()
         self.config.update(new_cfg)
         cfg.save(self.config)
-        # Re-register hotkeys live if the app provided a rebinder.
-        rebind = getattr(self, "rebind_hotkeys", None)
+        rebind = CTX.get("rebind")
         if callable(rebind):
             rebind()
         return self.config

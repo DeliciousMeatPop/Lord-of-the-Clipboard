@@ -15,6 +15,7 @@ import webview  # pywebview
 from . import config as cfg
 from . import source_app, storage, sync
 from ._version import __version__
+from .api import CTX as api_ctx
 from .api import Api
 from .clipboard_monitor import ClipboardMonitor
 from .hotkeys import HotkeyManager
@@ -62,10 +63,9 @@ def build():
         background_color="#14141c",
         hidden=True,  # lives in the background until a hotkey summons it
     )
-    api.window = window
-    # Always-on-top is handled natively (SetWindowPos), never via pywebview's
-    # window.on_top — poking that from a worker thread crashes.
-    api._on_top = config.get("ui", {}).get("always_on_top", True)
+    # Live objects go in api.CTX, NEVER as attributes of the exposed `api`
+    # object — pywebview would walk them into the native window/COM tree.
+    api_ctx["on_top"] = config.get("ui", {}).get("always_on_top", True)
 
     # New clips push into the UI (only matters while the window is visible).
     def on_new_clip(row):
@@ -75,7 +75,7 @@ def build():
             pass
 
     monitor = ClipboardMonitor(config, on_new_clip=on_new_clip)
-    api.monitor = monitor
+    api_ctx["monitor"] = monitor
 
     hk = HotkeyManager()
     tray = Tray(accent=config.get("ui", {}).get("accent", "#7c5cff"))
@@ -85,8 +85,8 @@ def build():
         import os
         h = source_app.foreground_external_hwnd(os.getpid())
         if h:
-            api.last_target_hwnd = h
-        api._favorites_mode = favorites
+            api_ctx["last_target_hwnd"] = h
+        api_ctx["favorites_mode"] = favorites
         try:
             window.show()
             # Apply always-on-top natively once the window is visible.
@@ -110,7 +110,7 @@ def build():
             mapping[binds["show_favorites"]] = lambda: summon(True)
         hk.rebind(mapping)
 
-    api.rebind_hotkeys = rebind
+    api_ctx["rebind"] = rebind
 
     def quit_app():
         try:
@@ -123,7 +123,7 @@ def build():
             except Exception:
                 pass
 
-    api.quit_app = quit_app
+    api_ctx["quit"] = quit_app
 
     def check_update_bg():
         from . import updater
@@ -159,7 +159,7 @@ def build():
         while not monitor._stop.wait(0.3):
             h = source_app.foreground_external_hwnd(my_pid)
             if h:
-                api.last_target_hwnd = h
+                api_ctx["last_target_hwnd"] = h
 
     def seed_examples():
         # One-time: drop in a couple of example snippets so the tokens are
